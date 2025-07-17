@@ -38,3 +38,13 @@ ingress:
 
 hpa:
   enabled: false
+
+# Resource requests and limits for the container.
+# See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+resources:
+  limits:
+    cpu: 2.5
+    memory: 800Mi
+  # requests:
+  #   cpu: 1
+  #   memory: 512Mi

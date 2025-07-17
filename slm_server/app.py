@@ -1,6 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
-from typing import Annotated, AsyncGenerator, Optional
+from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -43,24 +42,27 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
 
 app = FastAPI(
     title="OpenAI-compatible SLM Server",
-    description="A simple API server for serving a Small Language Model, compatible with the OpenAI Chat Completions format.",
+    description="A simple API server for serving a Small Language Model, "
+    + "compatible with the OpenAI Chat Completions format.",
 )
 
 
-@asynccontextmanager
-async def locked_llm_session(
-    llm_semaphore: asyncio.Semaphore,
-    timeout: Optional[float] = None,
+async def lock_llm_semaphor(
+    req: ChatCompletionRequest,
+    sem: Annotated[asyncio.Semaphore, Depends(get_llm_semaphor)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> AsyncGenerator[None, None]:
     """Context manager to acquire and release the LLM semaphore with a timeout."""
     try:
-        await asyncio.wait_for(llm_semaphore.acquire(), timeout=timeout)
-        yield
+        await asyncio.wait_for(
+            sem.acquire(), timeout=req.wait_timeout or settings.s_timeout
+        )
+        yield None
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail=DETAIL_SEM_TIMEOUT)
     finally:
-        if llm_semaphore.locked():
-            llm_semaphore.release()
+        if sem.locked():
+            sem.release()
 
 
 async def run_llm_streaming(
@@ -100,24 +102,19 @@ async def run_llm_non_streaming(
 async def create_chat_completion(
     req: ChatCompletionRequest,
     llm: Annotated[Llama, Depends(get_llm)],
-    sem: Annotated[asyncio.Semaphore, Depends(get_llm_semaphor)],
-    settings: Annotated[Settings, Depends(get_settings)],
+    _: Annotated[None, Depends(lock_llm_semaphor)],
 ):
     """
     Generates a chat completion, handling both streaming and non-streaming cases.
     Concurrency is managed by the `locked_llm_session` context manager.
     """
     try:
-        async with locked_llm_session(sem, req.wait_timeout or settings.s_timeout):
-            if req.stream:
-                return StreamingResponse(
-                    run_llm_streaming(llm, req), media_type="text/event-stream"
-                )
-            else:
-                return await run_llm_non_streaming(llm, req)
-    except HTTPException as e:
-        # Re-raise HTTP exceptions directly
-        raise e
+        if req.stream:
+            return StreamingResponse(
+                run_llm_streaming(llm, req), media_type="text/event-stream"
+            )
+        else:
+            return await run_llm_non_streaming(llm, req)
     except Exception as e:
         # Catch any other unexpected errors
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,40 +1,39 @@
-# 1. Use a slim Python 3.13 image, matching the project's requirement
-FROM python:3.13-slim
+# Stage 1: Dependency Installation
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm AS deps-builder
 
-# 2. Set Environment Variables
-#    - WORKER_COUNT: Number of uvicorn workers, defaults to 1.
-#      Can be overridden at runtime (e.g., docker run -e WORKER_COUNT=4)
-#    - Other fixed environment variables for uvicorn.
-ENV WORKER_COUNT=${WORKER_COUNT:-1}
-ENV HOST="0.0.0.0"
-ENV PORT="8000"
-ENV APP_MODULE="slm_server.app:app"
-
-# 3. Set Working Directory
+# Install the project into `/app`
 WORKDIR /app
 
-# 4. Install uv - the project's package manager
-RUN pip install uv
+# Enable bytecode compilation
+ENV UV_COMPILE_BYTECODE=1
 
-# 5. Copy project dependency definitions
-COPY pyproject.toml uv.lock ./
+# Copy from the cache instead of linking since it's a mounted volume
+ENV UV_LINK_MODE=copy
 
-# 6. Install dependencies using uv
-#    --system installs into the main python environment, not a venv
-RUN uv pip install --system .
+# Install the project's dependencies using the lockfile and settings
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-dev
 
-# 7. Copy the application code
-COPY ./slm_server ./slm_server
+# Stage 2: Final image
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm
 
-# 8. Declare the models volume
-#    This marks `/app/models` as a mount point for users.
-#    By default, the user should mount their local `./models` directory here.
-#    e.g., `docker run -v ./models:/app/models ...`
-VOLUME /app/models
+# Set workdir to run.
+WORKDIR /app
 
-# 9. Expose the application port
-EXPOSE 8000
+# Copy only the virtual environment from the deps-builder stage
+COPY --from=deps-builder /app/.venv /app/.venv
 
-# 10. Define the command to run the application
-#     Using shell form to allow the WORKER_COUNT environment variable to be substituted.
-CMD uvicorn ${APP_MODULE} --host ${HOST} --port ${PORT} --workers ${WORKER_COUNT}
+# Copy application source code
+COPY slm_server/ /app/slm_server/
+COPY scripts/ /app/scripts/
+
+# Set PATH for python
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Default port number
+ENV PORT=8000
+
+# Use start script as entrypoint
+ENTRYPOINT ["/app/scripts/start.sh"]

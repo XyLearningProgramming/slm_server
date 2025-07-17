@@ -1,0 +1,38 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up UV
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-suffix: slm_server
+        
+    - name: Set up Python
+      run: uv python install 3.13
+      
+    - name: Install dependencies
+      run: uv sync --dev
+      
+    - name: Build
+      run: uv build
+      
+    - name: Run tests (excluding e2e)
+      run: uv run pytest tests/ --ignore=tests/e2e/
+      
+    - name: Lint with ruff
+      run: |
+        uv run ruff check .
+        uv run ruff format --check .
