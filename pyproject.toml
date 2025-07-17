@@ -1,0 +1,11 @@
+[project]
+name = "slm_server"
+version = "1.0.0"
+description = "model server to serve a small language model as api with simple configs and a deploy chart"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.116.1",
+    "llama-cpp-python>=0.3.13",
+    "pydantic-settings>=2.10.1",
+]
