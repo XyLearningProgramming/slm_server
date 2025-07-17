@@ -21,4 +21,7 @@ class Settings(BaseSettings):
     seed: int = Field(42, description="Seed to inject for llama_cpp.")
     s_timeout: int = Field(1, description="Seconds to wait if undergoing another inference.")
 
-settings = Settings()
+def get_settings() -> Settings:
+    if not hasattr(get_settings, "_instance"):
+        get_settings._instance = Settings()
+    return get_settings._instance

@@ -1,0 +1,40 @@
+# Default values for slm-server.
+
+replicaCount: 1
+
+image:
+  repository: slm-server
+  pullPolicy: IfNotPresent
+  # Overridden by the CI/CD pipeline
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+persistence:
+  enabled: true
+  # The absolute path on the host node where the model data is stored.
+  hostPath: "/mnt/disks/ssd1/slm-data"
+  # The name of the node where the storage is located.
+  # This should be left empty and set during deployment.
+  # nodeName: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi # Adjust based on your model size
+  mountPath: /app/models
+
+# We are not using ingress or hpa for now
+ingress:
+  enabled: false
+
+hpa:
+  enabled: false
