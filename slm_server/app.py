@@ -1,16 +1,20 @@
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from llama_cpp import Llama
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from slm_server.config import Settings, get_settings
+from slm_server.logging import setup_logging
 from slm_server.model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionStreamResponse,
 )
+from slm_server.trace import setup_tracing
 
 # MAX_CONCURRENCY decides how many threads are calling model.
 # Default to 1 since llama cpp is designed to be at most efficiency
@@ -19,6 +23,15 @@ from slm_server.model import (
 MAX_CONCURRENCY = 1
 # Default timeout message in detail field.
 DETAIL_SEM_TIMEOUT = "Server is busy, please try again later."
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan function to configure tracing and logging on startup."""
+    settings = get_settings()
+    setup_tracing(settings.tracing)
+    setup_logging(settings.logging)
+    yield
 
 
 def get_llm_semaphor() -> asyncio.Semaphore:
@@ -36,15 +49,26 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
             seed=settings.seed,
             logits_all=False,
             embedding=False,
+            verbose=settings.logging.verbose,
         )
     return get_llm._instance
 
 
-app = FastAPI(
-    title="OpenAI-compatible SLM Server",
-    description="A simple API server for serving a Small Language Model, "
-    + "compatible with the OpenAI Chat Completions format.",
-)
+def get_app() -> FastAPI:
+    app = FastAPI(
+        title="OpenAI-compatible SLM Server",
+        description="A simple API server for serving a Small Language Model, "
+        + "compatible with the OpenAI Chat Completions format.",
+        lifespan=lifespan,
+    )
+
+    # Instrument FastAPI app with OpenTelemetry
+    FastAPIInstrumentor.instrument_app(app)
+    return app
+
+
+# Default app.
+app = get_app()
 
 
 async def lock_llm_semaphor(
