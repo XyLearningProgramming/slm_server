@@ -3,7 +3,7 @@
 replicaCount: 1
 
 image:
-  repository: slm-server
+  repository: x3huang/slm-server
   pullPolicy: IfNotPresent
   # Overridden by the CI/CD pipeline
   tag: ""

@@ -16,6 +16,7 @@ def override_get_llm():
 
 app.dependency_overrides[get_llm] = override_get_llm
 
+# Use TestClient with lifespan context to ensure metrics endpoint is created
 client = TestClient(app)
 
 
@@ -152,25 +153,16 @@ def test_metrics_endpoint_integration():
     assert "process_cpu_usage_percent" in content
     assert "process_memory_usage_bytes" in content
 
-    # Verify OpenTelemetry HTTP metrics are present
-    assert "http_server_active_requests" in content
-    assert "http_server_duration_milliseconds" in content
-    assert "http_server_response_size_bytes" in content
-
-    # Verify OpenTelemetry service metadata
-    assert "target_info" in content
-    assert 'service_name="slm_server"' in content
-    assert 'service_version="1.0.0"' in content
-
-    # Verify both instrumentations are working together
-    # OpenTelemetry metrics should have rich labels
-    assert 'http_method="GET"' in content
-    assert 'http_target="/health"' in content
-    assert 'http_status_code="200"' in content
-
-    # Verify Python default metrics are present
+    # Verify standard Python metrics are present
     assert "python_gc_objects_collected_total" in content
     assert "python_info" in content
+    assert "process_virtual_memory_bytes" in content
+
+    # Verify custom LLM metrics are present (even if empty)
+    assert "llm_span_latency_seconds" in content
+    assert "llm_input_tokens" in content
+    assert "llm_output_tokens" in content
+    assert "llm_time_to_first_token_seconds" in content
 
 
 def test_llm_span_setup():

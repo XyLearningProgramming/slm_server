@@ -1,5 +1,4 @@
 import asyncio
-from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -46,27 +45,21 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
     return get_llm._instance
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def get_app() -> FastAPI:
     # Get settings when creating app.
     settings = get_settings()
     # Set up trace and logging if enabled.
     setup_logging(settings.logging)
+    app = FastAPI(
+        title="OpenAI-compatible SLM Server",
+        description="A simple API server for serving a Small Language Model, "
+        + "compatible with the OpenAI Chat Completions format.",
+    )
     # Setup metrics if enabled
     setup_metrics(app, settings.metrics)
 
     # Setup trace and OTel metrics (this will also instrument FastAPI)
     setup_tracing(app, settings.tracing)
-    yield
-
-
-def get_app() -> FastAPI:
-    app = FastAPI(
-        title="OpenAI-compatible SLM Server",
-        description="A simple API server for serving a Small Language Model, "
-        + "compatible with the OpenAI Chat Completions format.",
-        lifespan=lifespan,
-    )
 
     return app
 
