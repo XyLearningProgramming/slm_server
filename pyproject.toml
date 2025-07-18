@@ -14,6 +14,10 @@ dependencies = [
     "opentelemetry-api>=1.35.0",
     "opentelemetry-sdk>=1.35.0",
     "opentelemetry-exporter-otlp>=1.35.0",
+    "opentelemetry-exporter-prometheus>=0.49b0",
+    "prometheus-client>=0.22.1",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "psutil>=6.1.0",
 ]
 
 [tool.ruff.lint]
@@ -28,3 +32,10 @@ dev = [
 
 [tool.ruff]
 line-length = 88
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["slm_server*"]

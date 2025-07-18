@@ -10,14 +10,15 @@ ENV_PREFIX = "SLM_"
 CONFIG_PY_PATH = Path(__file__).resolve()
 PROJECT_ROOT = CONFIG_PY_PATH.parent.parent
 MODELS_DIR = PROJECT_ROOT / "models"
+DOTENV_PATH = PROJECT_ROOT / ".env"
+
 
 MODEL_PATH_DEFAULT = str(MODELS_DIR / "Qwen3-0.6B-Q8_0.gguf")
 
 
 class LoggingSettings(BaseModel):
-    verbose: bool = Field(
-        True, description="If logging to stdout by uvicorn and cpp llama"
-    )
+    verbose: bool = Field(True, description="If logging to stdout by cpp llama")
+    level: str = Field("INFO", description="Log level default for loggers.")
 
 
 class MetricsSettings(BaseModel):
@@ -25,6 +26,7 @@ class MetricsSettings(BaseModel):
         True,
         description="If enable metrics to port",
     )
+    endpoint: str = Field("/metrics", description="Endpoint of metrics get handler.")
 
 
 class TraceSettings(BaseModel):
@@ -38,7 +40,13 @@ class TraceSettings(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(case_sensitive=False, env_prefix=ENV_PREFIX)
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_prefix=ENV_PREFIX,
+        env_nested_delimiter="__",
+        env_file=DOTENV_PATH,
+        env_file_encoding="utf-8",
+    )
 
     model_path: str = Field(MODEL_PATH_DEFAULT, description="Model path for llama_cpp.")
     n_ctx: int = Field(
@@ -53,6 +61,7 @@ class Settings(BaseSettings):
     )
 
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     tracing: TraceSettings = Field(default_factory=TraceSettings)
 
 

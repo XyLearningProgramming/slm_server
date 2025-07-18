@@ -5,16 +5,17 @@ from typing import Annotated, AsyncGenerator
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from llama_cpp import Llama
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from slm_server.config import Settings, get_settings
 from slm_server.logging import setup_logging
+from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionStreamResponse,
 )
 from slm_server.trace import setup_tracing
+from slm_server.utils import LLMStats, start_as_custom_span
 
 # MAX_CONCURRENCY decides how many threads are calling model.
 # Default to 1 since llama cpp is designed to be at most efficiency
@@ -23,15 +24,6 @@ from slm_server.trace import setup_tracing
 MAX_CONCURRENCY = 1
 # Default timeout message in detail field.
 DETAIL_SEM_TIMEOUT = "Server is busy, please try again later."
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """FastAPI lifespan function to configure tracing and logging on startup."""
-    settings = get_settings()
-    setup_tracing(settings.tracing)
-    setup_logging(settings.logging)
-    yield
 
 
 def get_llm_semaphor() -> asyncio.Semaphore:
@@ -54,6 +46,20 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
     return get_llm._instance
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Get settings when creating app.
+    settings = get_settings()
+    # Set up trace and logging if enabled.
+    setup_logging(settings.logging)
+    # Setup metrics if enabled
+    setup_metrics(app, settings.metrics)
+
+    # Setup trace and OTel metrics (this will also instrument FastAPI)
+    setup_tracing(app, settings.tracing)
+    yield
+
+
 def get_app() -> FastAPI:
     app = FastAPI(
         title="OpenAI-compatible SLM Server",
@@ -62,8 +68,6 @@ def get_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Instrument FastAPI app with OpenTelemetry
-    FastAPIInstrumentor.instrument_app(app)
     return app
 
 
@@ -94,17 +98,25 @@ async def run_llm_streaming(
 ) -> AsyncGenerator[str, None]:
     """Generator that runs the LLM and yields SSE chunks under lock."""
     messages_for_llm = [msg.model_dump() for msg in req.messages]
-    completion_stream = await asyncio.to_thread(
-        llm.create_chat_completion,
-        messages=messages_for_llm,
-        max_tokens=req.max_tokens,
-        temperature=req.temperature,
-        stream=True,
-    )
-    for chunk in completion_stream:
-        response_model = ChatCompletionStreamResponse.model_validate(chunk)
-        yield f"data: {response_model.model_dump_json()}\n\n"
-    yield "data: [DONE]\n\n"
+
+    stats = LLMStats.create_llm_stats(messages_for_llm)
+    with start_as_custom_span(req, messages_for_llm, stats, True):
+        completion_stream = await asyncio.to_thread(
+            llm.create_chat_completion,
+            messages=messages_for_llm,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            stream=True,
+        )
+
+        for chunk in completion_stream:
+            response_model = ChatCompletionStreamResponse.model_validate(chunk)
+            stats.update_with_chunk(response_model)
+
+            chunk_json = response_model.model_dump_json()
+            yield f"data: {chunk_json}\n\n"
+
+        yield "data: [DONE]\n\n"
 
 
 async def run_llm_non_streaming(
@@ -112,14 +124,22 @@ async def run_llm_non_streaming(
 ) -> ChatCompletionResponse:
     """Runs the LLM for a non-streaming request under lock."""
     messages_for_llm = [msg.model_dump() for msg in req.messages]
-    completion_result = await asyncio.to_thread(
-        llm.create_chat_completion,
-        messages=messages_for_llm,
-        max_tokens=req.max_tokens,
-        temperature=req.temperature,
-        stream=False,
-    )
-    return ChatCompletionResponse.model_validate(completion_result)
+
+    stats = LLMStats.create_llm_stats(messages_for_llm)
+    with start_as_custom_span(req, messages_for_llm, stats, False):
+        completion_result = await asyncio.to_thread(
+            llm.create_chat_completion,
+            messages=messages_for_llm,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            stream=False,
+        )
+
+        response_model = ChatCompletionResponse.model_validate(completion_result)
+
+        stats.update_with_usage(response_model)
+
+        return response_model
 
 
 @app.post("/api/v1/chat/completions")

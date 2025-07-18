@@ -1,7 +1,9 @@
 import base64
 
+from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -9,7 +11,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from slm_server.config import TraceSettings
 
 
-def setup_tracing(settings: TraceSettings) -> None:
+def setup_tracing(app: FastAPI, settings: TraceSettings) -> None:
     """Initialize OpenTelemetry tracing with optional Grafana Tempo export."""
     if not settings.enabled:
         return
@@ -21,6 +23,7 @@ def setup_tracing(settings: TraceSettings) -> None:
             "service.version": "1.0.0",  # TODO: make this more accurate?
         }
     )
+
     # Set up tracer provider
     trace.set_tracer_provider(TracerProvider(resource=resource))
     tracer_provider = trace.get_tracer_provider()
@@ -39,3 +42,12 @@ def setup_tracing(settings: TraceSettings) -> None:
 
         span_processor = BatchSpanProcessor(otlp_exporter)
         tracer_provider.add_span_processor(span_processor)
+
+    # Add Prometheus metrics processor
+    from slm_server.utils import PrometheusSpanProcessor
+
+    metrics_processor = PrometheusSpanProcessor()
+    tracer_provider.add_span_processor(metrics_processor)
+
+    # Instrument FastAPI with tracing
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=tracer_provider)

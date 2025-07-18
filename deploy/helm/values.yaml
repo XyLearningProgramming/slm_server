@@ -21,6 +21,17 @@ service:
   type: ClusterIP
   port: 8000
 
+# ServiceMonitor configuration for Prometheus
+serviceMonitor:
+  enabled: true
+  path: /metrics
+  interval: 71s
+  scrapeTimeout: 30s
+  labels: {}
+  annotations: {}
+  relabelings: []
+  metricRelabelings: []
+
 persistence:
   enabled: true
   # The absolute path on the host node where the model data is stored.
@@ -67,3 +78,22 @@ resources:
   # requests:
   #   cpu: 1
   #   memory: 512Mi
+
+# Readiness and liveness probes configuration
+probes:
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3

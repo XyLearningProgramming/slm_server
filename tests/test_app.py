@@ -127,3 +127,196 @@ def test_generic_exception():
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Something went wrong"
+
+
+def test_health_endpoint():
+    """Tests the health endpoint."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == "ok"
+
+
+def test_metrics_endpoint_integration():
+    """Tests that /metrics endpoint integrates both OpenTelemetry and prometheus-fastapi-instrumentator metrics."""
+    # Make a request to generate metrics
+    health_response = client.get("/health")
+    assert health_response.status_code == 200
+
+    # Check metrics endpoint
+    metrics_response = client.get("/metrics")
+    assert metrics_response.status_code == 200
+
+    content = metrics_response.text
+
+    # Verify prometheus-fastapi-instrumentator custom metrics are present
+    assert "process_cpu_usage_percent" in content
+    assert "process_memory_usage_bytes" in content
+
+    # Verify OpenTelemetry HTTP metrics are present
+    assert "http_server_active_requests" in content
+    assert "http_server_duration_milliseconds" in content
+    assert "http_server_response_size_bytes" in content
+
+    # Verify OpenTelemetry service metadata
+    assert "target_info" in content
+    assert 'service_name="slm_server"' in content
+    assert 'service_version="1.0.0"' in content
+
+    # Verify both instrumentations are working together
+    # OpenTelemetry metrics should have rich labels
+    assert 'http_method="GET"' in content
+    assert 'http_target="/health"' in content
+    assert 'http_status_code="200"' in content
+
+    # Verify Python default metrics are present
+    assert "python_gc_objects_collected_total" in content
+    assert "python_info" in content
+
+
+def test_llm_span_setup():
+    """Test the span setup logic for both streaming and non-streaming modes."""
+    from unittest.mock import Mock, patch
+
+    from slm_server.model import ChatCompletionRequest, ChatCompletionStreamResponse
+    from slm_server.utils import LLMStats, _finalize_llm_span, _setup_llm_span
+
+    # Create a mock span
+    mock_span = Mock()
+
+    # Create a test request
+    req = ChatCompletionRequest(
+        messages=[
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ],
+        max_tokens=100,
+        temperature=0.7,
+    )
+
+    messages_for_llm = [msg.model_dump() for msg in req.messages]
+
+    def test_streaming_span_setup():
+        """Test streaming mode span setup."""
+        # Mock the start time to a known value
+        with patch("time.time", return_value=1000.0):
+            stats = LLMStats.create_llm_stats(messages_for_llm)
+
+        # Test initial span setup
+        _setup_llm_span(mock_span, req, messages_for_llm, stats, True)
+
+        # Verify span attributes were set
+        expected_calls = [
+            ("llm.model", "llama-cpp"),
+            ("llm.streaming", True),
+            ("llm.max_tokens", 100),
+            ("llm.temperature", 0.7),
+            ("llm.input.message_count", 2),
+            ("llm.input.content_length", stats.input_content_length),
+        ]
+
+        for attr_name, attr_value in expected_calls:
+            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
+
+        # Simulate chunk processing
+        mock_response = Mock(spec=ChatCompletionStreamResponse)
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].delta = Mock()
+        mock_response.choices[0].delta.content = "Hello"
+
+        # Process multiple chunks with delays
+        with patch("time.time", side_effect=[1000.1, 1000.2, 1000.3]):
+            stats.update_with_chunk(mock_response)
+
+            mock_response.choices[0].delta.content = " there!"
+            stats.update_with_chunk(mock_response)
+
+            mock_response.choices[0].delta.content = " How are you?"
+            stats.update_with_chunk(mock_response)
+
+        # Test span finalization with streaming metrics
+        mock_span.reset_mock()
+        _finalize_llm_span(mock_span, stats, True)
+
+        # Verify streaming-specific attributes were set
+        streaming_calls = [
+            ("llm.output.content_length", stats.total_output_length),
+            ("llm.output.chunk_count", 3),
+            ("llm.time_to_first_token_ms", stats.time_to_first_token * 1000),
+            ("llm.average_chunk_interval_ms", stats.average_chunk_interval * 1000),
+            ("llm.average_chunk_size", stats.average_chunk_size),
+            ("llm.chunk_size_min", min(stats.chunk_sizes)),
+            ("llm.chunk_size_max", max(stats.chunk_sizes)),
+        ]
+
+        for attr_name, attr_value in streaming_calls:
+            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
+
+        # Verify metrics calculations
+        assert stats.chunk_count == 3
+        expected_length = len("Hello") + len(" there!") + len(" How are you?")
+        assert stats.total_output_length == expected_length
+        assert stats.time_to_first_token == pytest.approx(0.1)  # 1000.1 - 1000.0
+        assert len(stats.chunk_intervals) == 2  # intervals between chunks
+        assert stats.chunk_sizes == [5, 7, 13]  # lengths of chunk contents
+        # Check that intervals are approximately 0.1 seconds
+        assert all(interval == pytest.approx(0.1) for interval in stats.chunk_intervals)
+
+    def test_non_streaming_span_setup():
+        """Test non-streaming mode span setup."""
+        mock_span.reset_mock()
+        stats = LLMStats.create_llm_stats(messages_for_llm)
+
+        # Test initial span setup
+        _setup_llm_span(mock_span, req, messages_for_llm, stats, False)
+
+        # Verify span attributes were set
+        expected_calls = [
+            ("llm.model", "llama-cpp"),
+            ("llm.streaming", False),
+            ("llm.max_tokens", 100),
+            ("llm.temperature", 0.7),
+            ("llm.input.message_count", 2),
+            ("llm.input.content_length", stats.input_content_length),
+        ]
+
+        for attr_name, attr_value in expected_calls:
+            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
+
+        # Simulate completion result processing
+        from slm_server.model import ChatCompletionResponse
+
+        mock_response = Mock(spec=ChatCompletionResponse)
+        mock_response.choices = [Mock()]
+        mock_response.choices[0].message = Mock()
+        mock_response.choices[0].message.content = "Hello there! How are you?"
+        mock_response.usage = Mock()
+        mock_response.usage.prompt_tokens = 10
+        mock_response.usage.completion_tokens = 15
+        mock_response.usage.total_tokens = 25
+
+        stats.update_with_usage(mock_response)
+
+        # Test span finalization with non-streaming metrics
+        mock_span.reset_mock()
+        _finalize_llm_span(mock_span, stats, False)
+
+        # Verify non-streaming-specific attributes were set
+        non_streaming_calls = [
+            ("llm.output.content_length", stats.total_output_length),
+            ("llm.usage.prompt_tokens", 10),
+            ("llm.usage.completion_tokens", 15),
+            ("llm.usage.total_tokens", 25),
+        ]
+
+        for attr_name, attr_value in non_streaming_calls:
+            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
+
+        # Verify metrics
+        assert stats.total_output_length == len("Hello there! How are you?")
+        assert stats.prompt_tokens == 10
+        assert stats.completion_tokens == 15
+        assert stats.total_tokens == 25
+
+    # Run both tests
+    test_streaming_span_setup()
+    test_non_streaming_span_setup()
