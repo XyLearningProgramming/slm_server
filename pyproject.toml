@@ -32,6 +32,7 @@ dev = [
 
 [tool.ruff]
 line-length = 88
+extend-exclude = ["tests"]
 
 [build-system]
 requires = ["setuptools>=45", "wheel"]

@@ -139,7 +139,9 @@ def start_as_custom_span(
     stats: LLMStats,
     is_streaming: bool,
 ):
-    """Context manager for LLM span with automatic setup, finalization, and error handling."""
+    """
+    Context manager for LLM span with automatic setup, finalization, and error handling.
+    ."""
     span_name = f"{LLM_SPAN_PREFIX}.{'streaming' if is_streaming else 'non_streaming'}"
 
     with tracer.start_as_current_span(span_name) as span:
