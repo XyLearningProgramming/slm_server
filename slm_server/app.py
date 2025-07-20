@@ -14,7 +14,12 @@ from slm_server.model import (
     ChatCompletionStreamResponse,
 )
 from slm_server.trace import setup_tracing
-from slm_server.utils import LLMStats, start_as_custom_span
+from slm_server.utils import (
+    set_atrribute_response,
+    set_atrribute_response_stream,
+    slm_chunk_span,
+    slm_span,
+)
 
 # MAX_CONCURRENCY decides how many threads are calling model.
 # Default to 1 since llama cpp is designed to be at most efficiency
@@ -90,10 +95,7 @@ async def run_llm_streaming(
     llm: Llama, req: ChatCompletionRequest
 ) -> AsyncGenerator[str, None]:
     """Generator that runs the LLM and yields SSE chunks under lock."""
-    messages_for_llm = [msg.model_dump() for msg in req.messages]
-
-    stats = LLMStats.create_llm_stats(messages_for_llm)
-    with start_as_custom_span(req, messages_for_llm, stats, True):
+    with slm_span(req, is_streaming=True) as (span, messages_for_llm):
         completion_stream = await asyncio.to_thread(
             llm.create_chat_completion,
             messages=messages_for_llm,
@@ -102,12 +104,18 @@ async def run_llm_streaming(
             stream=True,
         )
 
-        for chunk in completion_stream:
-            response_model = ChatCompletionStreamResponse.model_validate(chunk)
-            stats.update_with_chunk(response_model)
-
-            chunk_json = response_model.model_dump_json()
-            yield f"data: {chunk_json}\n\n"
+        # Use traced iterator that automatically handles chunk spans and parent span updates
+        while True:
+            try:
+                with slm_chunk_span(span) as chunk_span:
+                    chunk = next(completion_stream)
+                    response_model = ChatCompletionStreamResponse.model_validate(
+                        chunk
+                    )
+                    set_atrribute_response_stream(chunk_span, response_model)
+                    yield f"data: {response_model}\n\n"
+            except StopIteration:
+                break
 
         yield "data: [DONE]\n\n"
 
@@ -116,10 +124,7 @@ async def run_llm_non_streaming(
     llm: Llama, req: ChatCompletionRequest
 ) -> ChatCompletionResponse:
     """Runs the LLM for a non-streaming request under lock."""
-    messages_for_llm = [msg.model_dump() for msg in req.messages]
-
-    stats = LLMStats.create_llm_stats(messages_for_llm)
-    with start_as_custom_span(req, messages_for_llm, stats, False):
+    with slm_span(req, is_streaming=False) as (span, messages_for_llm):
         completion_result = await asyncio.to_thread(
             llm.create_chat_completion,
             messages=messages_for_llm,
@@ -129,8 +134,7 @@ async def run_llm_non_streaming(
         )
 
         response_model = ChatCompletionResponse.model_validate(completion_result)
-
-        stats.update_with_usage(response_model)
+        set_atrribute_response(span, response_model)
 
         return response_model
 

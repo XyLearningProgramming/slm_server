@@ -37,10 +37,9 @@ class TraceSettings(BaseModel):
     endpoint: str = Field("", description="Grafana Tempo OTLP endpoint URL")
     username: str = Field("", description="Grafana Tempo basic auth username")
     password: str = Field("", description="Grafana Tempo basic auth password")
-    # TODO: maybe filter what is sent.
-    # sample_rate: float = Field(
-    #     0.1, description="Trace sampling rate (0.0-1.0), default 10%"
-    # )
+    sample_rate: float = Field(
+        0.1, description="Trace sampling rate (0.0-1.0), default 10%"
+    )
 
 
 class Settings(BaseSettings):

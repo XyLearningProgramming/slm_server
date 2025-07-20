@@ -7,6 +7,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
 from slm_server.config import TraceSettings
 
@@ -23,15 +24,16 @@ def setup_tracing(app: FastAPI, settings: TraceSettings) -> None:
             "service.version": "1.0.0",  # TODO: make this more accurate?
         }
     )
+    from slm_server.utils import ErrorAwareSampler
 
     # Set up tracer provider with error-aware sampler
-    # base_sampler = TraceIdRatioBasedSampler(settings.sample_rate)
-    # error_aware_sampler = ErrorAwareSampler(base_sampler)
+    ratio_based_sampler = TraceIdRatioBased(settings.sample_rate)
+    error_aware_sampler = ErrorAwareSampler(ratio_based_sampler)
 
     trace.set_tracer_provider(
         TracerProvider(
             resource=resource,
-            #    sampler=ParentBased(root=error_aware_sampler),
+            sampler=ParentBased(root=error_aware_sampler),
         )
     )
     tracer_provider = trace.get_tracer_provider()
@@ -51,10 +53,15 @@ def setup_tracing(app: FastAPI, settings: TraceSettings) -> None:
         otlp_processor = BatchSpanProcessor(otlp_exporter)
         tracer_provider.add_span_processor(otlp_processor)
 
-    # Add Prometheus metrics processor - processes ALL spans (sampled + unsampled)
-    from slm_server.utils import PrometheusSpanProcessor
+    # Add span processors - process ALL spans (sampled + unsampled)
+    from slm_server.utils import SLMLoggingSpanProcessor, SLMMetricsSpanProcessor
 
-    metrics_processor = PrometheusSpanProcessor()
+    # Add logging processor for SLM-specific logging
+    logging_processor = SLMLoggingSpanProcessor()
+    tracer_provider.add_span_processor(logging_processor)
+
+    # Add metrics processor for SLM-specific metrics
+    metrics_processor = SLMMetricsSpanProcessor()
     tracer_provider.add_span_processor(metrics_processor)
 
     # Instrument FastAPI with tracing

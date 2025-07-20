@@ -58,8 +58,12 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: |
+          type=gha
+          type=registry,ref=${{ secrets.REGISTRY_REPOSITORY }}:buildcache
+        cache-to: |
+          type=gha,mode=max
+          type=registry,ref=${{ secrets.REGISTRY_REPOSITORY }}:buildcache,mode=max
         
     - name: Set up Kubernetes config
       run: |
@@ -78,7 +82,13 @@ jobs:
         if [ -n "${{ secrets.HELM_VALUES_ENV }}" ]; then
           echo "helm_env_values<<EOF" >> $GITHUB_OUTPUT
           echo "${{ secrets.HELM_VALUES_ENV }}" | while IFS='=' read -r key value; do
+            # Skip commented lines and empty lines
+            if [[ "$key" =~ ^#.*$ ]] || [ -z "$key" ]; then
+              continue
+            fi
             if [ -n "$key" ] && [ -n "$value" ]; then
+              # Mask sensitive values in GitHub Actions logs
+              echo "::add-mask::$value"
               echo "  $key: \"$value\""
             fi
           done >> $GITHUB_OUTPUT
