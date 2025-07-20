@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     n_threads: int = Field(
         2, description="Number of OpenMP threads llama‑cpp will spawn."
     )
+    n_batch: int = Field(
+        512, description="Number of tokens to process in a single batch."
+    )
     seed: int = Field(42, description="Seed to inject for llama_cpp.")
     s_timeout: int = Field(
         1, description="Seconds to wait if undergoing another inference."

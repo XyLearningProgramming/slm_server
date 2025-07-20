@@ -42,10 +42,13 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
             model_path=settings.model_path,
             n_ctx=settings.n_ctx,
             n_threads=settings.n_threads,
+            n_batch=settings.n_batch,
+            verbose=settings.logging.verbose,
             seed=settings.seed,
             logits_all=False,
             embedding=False,
-            verbose=settings.logging.verbose,
+            use_mlock=True,  # Use mlock to prevent memory swapping
+            use_mmap=True,  # Use memory-mapped files for faster access
         )
     return get_llm._instance
 
