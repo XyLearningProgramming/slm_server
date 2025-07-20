@@ -14,6 +14,7 @@ ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv venv && \
     uv pip install llama-cpp-python --find-links https://github.com/jllllll/llama-cpp-python-cuBLAS-wheels/releases/expanded_assets/textgen-webui && \
     uv sync --locked --no-install-project --no-dev --no-build-isolation
 
