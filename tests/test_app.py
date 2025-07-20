@@ -2,12 +2,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import set_tracer_provider
 
 from slm_server.app import DETAIL_SEM_TIMEOUT, app, get_llm
 
 # Create a mock Llama instance
 mock_llama = MagicMock()
 
+# Set up OpenTelemetry for tests
+tracer_provider = TracerProvider()
+memory_exporter = InMemorySpanExporter()
+span_processor = SimpleSpanProcessor(memory_exporter)
+tracer_provider.add_span_processor(span_processor)
+set_tracer_provider(tracer_provider)
 
 # Override the get_llm dependency with the mock
 def override_get_llm():
