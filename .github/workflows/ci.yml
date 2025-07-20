@@ -23,10 +23,7 @@ jobs:
         python-version: 3.13
       
     - name: Install dependencies
-      run: |
-        uv venv
-        uv pip install llama-cpp-python --find-links https://github.com/jllllll/llama-cpp-python-cuBLAS-wheels/releases/expanded_assets/textgen-webui
-        uv sync --dev --no-build-isolation
+      run: uv sync --dev --find-links https://github.com/jllllll/llama-cpp-python-cuBLAS-wheels/releases/expanded_assets/textgen-webui
       
     - name: Minimize uv cache
       run: uv cache prune --ci
