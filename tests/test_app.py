@@ -35,6 +35,11 @@ def reset_mock():
     """Reset the mock before each test."""
     mock_llama.reset_mock()
     mock_llama.create_chat_completion.side_effect = None  # Clear any side effects
+    
+    # Patch the tracer in utils.py to use our test tracer
+    local_tracer = tracer_provider.get_tracer(__name__)
+    with patch('slm_server.utils.tracer', local_tracer):
+        yield
 
 
 def test_chat_completion_non_streaming():
