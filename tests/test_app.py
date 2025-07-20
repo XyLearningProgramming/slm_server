@@ -24,6 +24,7 @@ client = TestClient(app)
 def reset_mock():
     """Reset the mock before each test."""
     mock_llama.reset_mock()
+    mock_llama.create_chat_completion.side_effect = None  # Clear any side effects
 
 
 def test_chat_completion_non_streaming():
@@ -127,7 +128,7 @@ def test_generic_exception():
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "Something went wrong"
+    assert "Something went wrong" in response.json()["detail"]
 
 
 def test_health_endpoint():
@@ -158,157 +159,256 @@ def test_metrics_endpoint_integration():
     assert "python_info" in content
     assert "process_virtual_memory_bytes" in content
 
-    # Verify custom LLM metrics are present (even if empty)
-    assert "llm_span_latency_seconds" in content
-    assert "llm_input_tokens" in content
-    assert "llm_output_tokens" in content
-    assert "llm_time_to_first_token_seconds" in content
+    # Verify custom SLM metrics are present (even if empty)
+    assert "slm_completion_duration_seconds" in content
+    assert "slm_tokens_total" in content
+    assert "slm_completion_tokens_per_second" in content
+    assert "slm_first_token_delay_ms" in content
 
 
-def test_llm_span_setup():
-    """Test the span setup logic for both streaming and non-streaming modes."""
-    from unittest.mock import Mock, patch
-
-    from slm_server.model import ChatCompletionRequest, ChatCompletionStreamResponse
-    from slm_server.utils import LLMStats, _finalize_llm_span, _setup_llm_span
-
-    # Create a mock span
-    mock_span = Mock()
-
-    # Create a test request
-    req = ChatCompletionRequest(
-        messages=[
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"},
-        ],
-        max_tokens=100,
-        temperature=0.7,
+def test_streaming_call_with_tracing_integration():
+    """Integration test for streaming call with complete tracing flow."""
+    from unittest.mock import patch
+    
+    # Mock chunks with realistic content
+    mock_chunks = [
+        {
+            "id": "chatcmpl-123",
+            "object": "chat.completion.chunk",
+            "created": 1234567890,
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": "Hello"},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-123", 
+            "object": "chat.completion.chunk",
+            "created": 1234567890,
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": " there!"},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-123",
+            "object": "chat.completion.chunk", 
+            "created": 1234567890,
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": " How are you?"},
+                    "finish_reason": "stop",
+                }
+            ],
+        },
+    ]
+    mock_llama.create_chat_completion.return_value = iter(mock_chunks)
+    
+    # Make streaming request
+    response = client.post(
+        "/api/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "Hello world! This is a test message."}],
+            "stream": True,
+            "max_tokens": 100,
+            "temperature": 0.8
+        },
     )
+    
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    
+    # Verify streaming content
+    content = response.text
+    assert "Hello" in content
+    assert "there!" in content
+    assert "How are you?" in content
+    assert "data: [DONE]" in content
+    
+    # Verify the LLM was called with correct parameters
+    mock_llama.create_chat_completion.assert_called_once()
+    call_args = mock_llama.create_chat_completion.call_args
+    
+    assert call_args[1]["max_tokens"] == 100
+    assert call_args[1]["temperature"] == 0.8
+    assert call_args[1]["stream"] is True
+    assert len(call_args[1]["messages"]) == 1
+    assert call_args[1]["messages"][0]["content"] == "Hello world! This is a test message."
 
-    messages_for_llm = [msg.model_dump() for msg in req.messages]
 
-    def test_streaming_span_setup():
-        """Test streaming mode span setup."""
-        # Mock the start time to a known value
-        with patch("time.time", return_value=1000.0):
-            stats = LLMStats.create_llm_stats(messages_for_llm)
+def test_non_streaming_call_with_tracing_integration():
+    """Integration test for non-streaming call with complete tracing flow."""
+    from unittest.mock import patch
+    
+    # Mock complete response with usage metrics
+    mock_llama.create_chat_completion.return_value = {
+        "id": "chatcmpl-456",
+        "object": "chat.completion",
+        "created": 1234567890,
+        "model": "test-model",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Hello! I'm doing well, thank you for asking. How can I help you today?",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 15,
+            "completion_tokens": 20,
+            "total_tokens": 35
+        },
+    }
+    
+    # Make non-streaming request
+    response = client.post(
+        "/api/v1/chat/completions",
+        json={
+            "messages": [
+                {"role": "user", "content": "Hello, how are you?"},
+                {"role": "assistant", "content": "I'm doing well!"},
+                {"role": "user", "content": "Great! Can you help me with something?"}
+            ],
+            "stream": False,
+            "max_tokens": 150,
+            "temperature": 0.3
+        },
+    )
+    
+    assert response.status_code == 200
+    
+    # Verify response structure
+    response_data = response.json()
+    assert response_data["object"] == "chat.completion"
+    assert response_data["choices"][0]["message"]["content"] == "Hello! I'm doing well, thank you for asking. How can I help you today?"
+    assert response_data["usage"]["prompt_tokens"] == 15
+    assert response_data["usage"]["completion_tokens"] == 20
+    assert response_data["usage"]["total_tokens"] == 35
+    
+    # Verify the LLM was called with correct parameters  
+    mock_llama.create_chat_completion.assert_called_once()
+    call_args = mock_llama.create_chat_completion.call_args
+    
+    assert call_args[1]["max_tokens"] == 150
+    assert call_args[1]["temperature"] == 0.3
+    assert call_args[1]["stream"] is False
+    assert len(call_args[1]["messages"]) == 3
+    
+    # Verify message content
+    messages = call_args[1]["messages"]
+    assert messages[0]["content"] == "Hello, how are you?"
+    assert messages[1]["content"] == "I'm doing well!"
+    assert messages[2]["content"] == "Great! Can you help me with something?"
 
-        # Test initial span setup
-        _setup_llm_span(mock_span, req, messages_for_llm, stats, True)
 
-        # Verify span attributes were set
-        expected_calls = [
-            ("llm.model", "llama-cpp"),
-            ("llm.streaming", True),
-            ("llm.max_tokens", 100),
-            ("llm.temperature", 0.7),
-            ("llm.input.message_count", 2),
-            ("llm.input.content_length", stats.input_content_length),
-        ]
+def test_streaming_call_with_empty_chunks():
+    """Test streaming call handling empty chunks correctly."""
+    # Mock chunks including empty ones
+    mock_chunks = [
+        {
+            "id": "chatcmpl-789",
+            "object": "chat.completion.chunk",
+            "created": 1234567890,
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": "Start"},
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-789",
+            "object": "chat.completion.chunk", 
+            "created": 1234567890,
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": ""},  # Empty chunk
+                    "finish_reason": None,
+                }
+            ],
+        },
+        {
+            "id": "chatcmpl-789",
+            "object": "chat.completion.chunk",
+            "created": 1234567890, 
+            "model": "test-model",
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": " End"},
+                    "finish_reason": "stop",
+                }
+            ],
+        },
+    ]
+    mock_llama.create_chat_completion.return_value = iter(mock_chunks)
+    
+    response = client.post(
+        "/api/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "Test empty chunks"}],
+            "stream": True
+        },
+    )
+    
+    assert response.status_code == 200
+    
+    # Verify content handling
+    content = response.text
+    assert "Start" in content
+    assert " End" in content
+    assert "data: [DONE]" in content
+    
+    # Should handle empty chunks gracefully without errors
+    mock_llama.create_chat_completion.assert_called_once()
 
-        for attr_name, attr_value in expected_calls:
-            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
 
-        # Simulate chunk processing
-        mock_response = Mock(spec=ChatCompletionStreamResponse)
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].delta = Mock()
-        mock_response.choices[0].delta.content = "Hello"
+def test_request_validation_and_defaults():
+    """Test request validation and default parameter handling."""
+    # Test minimal request
+    mock_llama.create_chat_completion.return_value = {
+        "id": "chatcmpl-minimal",
+        "object": "chat.completion", 
+        "created": 1234567890,
+        "model": "test-model",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Response"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+    }
+    
+    response = client.post(
+        "/api/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "Test"}]},
+    )
+    
+    assert response.status_code == 200
+    
+    # Verify defaults were applied
+    call_args = mock_llama.create_chat_completion.call_args
+    assert call_args[1]["max_tokens"] == 2048  # Default value
+    assert call_args[1]["temperature"] == 0.7  # Default value
+    assert call_args[1]["stream"] is False     # Default value
 
-        # Process multiple chunks with delays
-        with patch("time.time", side_effect=[1000.1, 1000.2, 1000.3]):
-            stats.update_with_chunk(mock_response)
 
-            mock_response.choices[0].delta.content = " there!"
-            stats.update_with_chunk(mock_response)
-
-            mock_response.choices[0].delta.content = " How are you?"
-            stats.update_with_chunk(mock_response)
-
-        # Test span finalization with streaming metrics
-        mock_span.reset_mock()
-        _finalize_llm_span(mock_span, stats, True)
-
-        # Verify streaming-specific attributes were set
-        streaming_calls = [
-            ("llm.output.content_length", stats.total_output_length),
-            ("llm.output.chunk_count", 3),
-            ("llm.time_to_first_token_ms", stats.time_to_first_token * 1000),
-            ("llm.average_chunk_interval_ms", stats.average_chunk_interval * 1000),
-            ("llm.average_chunk_size", stats.average_chunk_size),
-            ("llm.chunk_size_min", min(stats.chunk_sizes)),
-            ("llm.chunk_size_max", max(stats.chunk_sizes)),
-        ]
-
-        for attr_name, attr_value in streaming_calls:
-            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
-
-        # Verify metrics calculations
-        assert stats.chunk_count == 3
-        expected_length = len("Hello") + len(" there!") + len(" How are you?")
-        assert stats.total_output_length == expected_length
-        assert stats.time_to_first_token == pytest.approx(0.1)  # 1000.1 - 1000.0
-        assert len(stats.chunk_intervals) == 2  # intervals between chunks
-        assert stats.chunk_sizes == [5, 7, 13]  # lengths of chunk contents
-        # Check that intervals are approximately 0.1 seconds
-        assert all(interval == pytest.approx(0.1) for interval in stats.chunk_intervals)
-
-    def test_non_streaming_span_setup():
-        """Test non-streaming mode span setup."""
-        mock_span.reset_mock()
-        stats = LLMStats.create_llm_stats(messages_for_llm)
-
-        # Test initial span setup
-        _setup_llm_span(mock_span, req, messages_for_llm, stats, False)
-
-        # Verify span attributes were set
-        expected_calls = [
-            ("llm.model", "llama-cpp"),
-            ("llm.streaming", False),
-            ("llm.max_tokens", 100),
-            ("llm.temperature", 0.7),
-            ("llm.input.message_count", 2),
-            ("llm.input.content_length", stats.input_content_length),
-        ]
-
-        for attr_name, attr_value in expected_calls:
-            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
-
-        # Simulate completion result processing
-        from slm_server.model import ChatCompletionResponse
-
-        mock_response = Mock(spec=ChatCompletionResponse)
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message = Mock()
-        mock_response.choices[0].message.content = "Hello there! How are you?"
-        mock_response.usage = Mock()
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 15
-        mock_response.usage.total_tokens = 25
-
-        stats.update_with_usage(mock_response)
-
-        # Test span finalization with non-streaming metrics
-        mock_span.reset_mock()
-        _finalize_llm_span(mock_span, stats, False)
-
-        # Verify non-streaming-specific attributes were set
-        non_streaming_calls = [
-            ("llm.output.content_length", stats.total_output_length),
-            ("llm.usage.prompt_tokens", 10),
-            ("llm.usage.completion_tokens", 15),
-            ("llm.usage.total_tokens", 25),
-        ]
-
-        for attr_name, attr_value in non_streaming_calls:
-            mock_span.set_attribute.assert_any_call(attr_name, attr_value)
-
-        # Verify metrics
-        assert stats.total_output_length == len("Hello there! How are you?")
-        assert stats.prompt_tokens == 10
-        assert stats.completion_tokens == 15
-        assert stats.total_tokens == 25
-
-    # Run both tests
-    test_streaming_span_setup()
-    test_non_streaming_span_setup()

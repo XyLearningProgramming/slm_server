@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -17,7 +18,6 @@ from slm_server.trace import setup_tracing
 from slm_server.utils import (
     set_atrribute_response,
     set_atrribute_response_stream,
-    slm_chunk_span,
     slm_span,
 )
 
@@ -105,17 +105,10 @@ async def run_llm_streaming(
         )
 
         # Use traced iterator that automatically handles chunk spans and parent span updates
-        while True:
-            try:
-                with slm_chunk_span(span) as chunk_span:
-                    chunk = next(completion_stream)
-                    response_model = ChatCompletionStreamResponse.model_validate(
-                        chunk
-                    )
-                    set_atrribute_response_stream(chunk_span, response_model)
-                    yield f"data: {response_model}\n\n"
-            except StopIteration:
-                break
+        for chunk in completion_stream:
+            response_model = ChatCompletionStreamResponse.model_validate(chunk)
+            set_atrribute_response_stream(span, response_model)
+            yield f"data: {response_model.model_dump_json()}\n\n"
 
         yield "data: [DONE]\n\n"
 
@@ -156,9 +149,10 @@ async def create_chat_completion(
             )
         else:
             return await run_llm_non_streaming(llm, req)
-    except Exception as e:
+    except Exception:
         # Catch any other unexpected errors
-        raise HTTPException(status_code=500, detail=str(e))
+        error_str = traceback.format_exc()
+        raise HTTPException(status_code=500, detail=error_str)
 
 
 @app.get("/health")

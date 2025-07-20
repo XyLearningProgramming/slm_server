@@ -1,11 +1,13 @@
 import logging
+import traceback
 from contextlib import contextmanager
 
 from llama_cpp import ChatCompletionStreamResponse
 from opentelemetry import trace
+from opentelemetry.sdk.trace import Span
 from opentelemetry.sdk.trace.export import SpanProcessor
 from opentelemetry.sdk.trace.sampling import Decision, Sampler, SamplingResult
-from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.trace import Status, StatusCode
 from prometheus_client import Counter, Histogram
 
 from slm_server.model import ChatCompletionRequest, ChatCompletionResponse
@@ -16,7 +18,15 @@ SPAN_PREFIX = "slm"
 
 # Span names
 SPAN_CHAT_COMPLETION = f"{SPAN_PREFIX}.chat_completion"
-SPAN_CHUNK_GENERATION = f"{SPAN_PREFIX}.chunk_generation"
+
+# Event names
+EVENT_CHUNK_GENERATED = f"{SPAN_PREFIX}.chunk_generated"
+
+# Event attribute names
+EVENT_ATTR_CHUNK_SIZE = f"{SPAN_PREFIX}.chunk_size"
+EVENT_ATTR_CHUNK_CONTENT_SIZE = f"{SPAN_PREFIX}.chunk_content_size"
+# EVENT_ATTR_CHUNK_CONTENT = f"{SPAN_PREFIX}.chunk_content"
+# EVENT_ATTR_FINISH_REASON = f"{SPAN_PREFIX}.finish_reason"
 
 # Attribute names
 ATTR_MODEL = f"{SPAN_PREFIX}.model"
@@ -40,8 +50,68 @@ ATTR_TOTAL_TOKENS_PER_SECOND = f"{SPAN_PREFIX}.timing.total_tokens_per_second"
 ATTR_CHUNK_DELAY = f"{SPAN_PREFIX}.timing.chunk_delay_ms"
 ATTR_CHUNK_DURATION = f"{SPAN_PREFIX}.timing.chunk_duration_ms"
 ATTR_TOTAL_DURATION = f"{SPAN_PREFIX}.timing.total_duration_ms"
-ATTR_FIRST_CHUNK_TIME = f"{SPAN_PREFIX}.timing.first_chunk_time"
 ATTR_CHUNK_CONTENT_SIZE = f"{SPAN_PREFIX}.chunk.content_size"
+
+# Calculated metric names (used as keys in calculate_performance_metrics)
+METRIC_TOTAL_DURATION = ATTR_TOTAL_DURATION
+METRIC_TOKENS_PER_SECOND = ATTR_TOKENS_PER_SECOND
+METRIC_TOTAL_TOKENS_PER_SECOND = ATTR_TOTAL_TOKENS_PER_SECOND
+METRIC_CHUNK_DELAY = ATTR_CHUNK_DELAY
+METRIC_FIRST_TOKEN_DELAY = ATTR_FIRST_TOKEN_DELAY
+METRIC_AVG_CHUNK_SIZE = f"{SPAN_PREFIX}.metrics.avg_chunk_size"
+METRIC_AVG_CHUNK_CONTENT_SIZE = f"{SPAN_PREFIX}.metrics.avg_chunk_content_size"
+METRIC_MAX_CHUNK_SIZE = f"{SPAN_PREFIX}.metrics.max_chunk_size"
+METRIC_MIN_CHUNK_SIZE = f"{SPAN_PREFIX}.metrics.min_chunk_size"
+METRIC_CHUNKS_WITH_CONTENT = f"{SPAN_PREFIX}.metrics.chunks_with_content"
+METRIC_EMPTY_CHUNKS = f"{SPAN_PREFIX}.metrics.empty_chunks"
+
+# Log data keys (for consistent logging format)
+LOG_KEY_MAX_TOKENS = "max_tokens"
+LOG_KEY_TEMPERATURE = "temperature"
+LOG_KEY_INPUT_MESSAGES = "input_messages"
+LOG_KEY_INPUT_CONTENT_LENGTH = "input_content_length"
+LOG_KEY_DURATION_MS = "duration_ms"
+LOG_KEY_OUTPUT_CONTENT_LENGTH = "output_content_length"
+LOG_KEY_TOTAL_TOKENS = "total_tokens"
+LOG_KEY_COMPLETION_TOKENS = "completion_tokens"
+LOG_KEY_COMPLETION_TOKENS_PER_SECOND = "completion_tokens_per_second"
+LOG_KEY_TOTAL_TOKENS_PER_SECOND = "total_tokens_per_second"
+LOG_KEY_CHUNK_COUNT = "chunk_count"
+LOG_KEY_AVG_CHUNK_DELAY_MS = "avg_chunk_delay_ms"
+LOG_KEY_FIRST_TOKEN_DELAY_MS = "first_token_delay_ms"
+LOG_KEY_AVG_CHUNK_SIZE = "avg_chunk_size"
+LOG_KEY_AVG_CHUNK_CONTENT_SIZE = "avg_chunk_content_size"
+LOG_KEY_CHUNKS_WITH_CONTENT = "chunks_with_content"
+LOG_KEY_EMPTY_CHUNKS = "empty_chunks"
+
+# Prometheus metric names and descriptions
+PROMETHEUS_COMPLETION_DURATION = "slm_completion_duration_seconds"
+PROMETHEUS_COMPLETION_DURATION_DESC = "SLM completion duration in seconds"
+PROMETHEUS_TOKEN_COUNT = "slm_tokens_total"
+PROMETHEUS_TOKEN_COUNT_DESC = "Total tokens processed"
+PROMETHEUS_COMPLETION_TOKENS_PER_SECOND = "slm_completion_tokens_per_second"
+PROMETHEUS_COMPLETION_TOKENS_PER_SECOND_DESC = (
+    "Completion token generation rate (tokens/sec)"
+)
+PROMETHEUS_TOTAL_TOKENS_PER_SECOND = "slm_total_tokens_per_second"
+PROMETHEUS_TOTAL_TOKENS_PER_SECOND_DESC = (
+    "Total token throughput including prompt processing (tokens/sec)"
+)
+PROMETHEUS_FIRST_TOKEN_DELAY = "slm_first_token_delay_ms"
+PROMETHEUS_FIRST_TOKEN_DELAY_DESC = "Time to first token in milliseconds (streaming)"
+PROMETHEUS_CHUNK_DELAY = "slm_chunk_delay_ms"
+PROMETHEUS_CHUNK_DELAY_DESC = "Average chunk delay in milliseconds (streaming)"
+PROMETHEUS_CHUNK_DURATION = "slm_chunk_duration_ms"
+PROMETHEUS_CHUNK_DURATION_DESC = "Individual chunk processing duration in milliseconds"
+PROMETHEUS_ERROR_TOTAL = "slm_errors_total"
+PROMETHEUS_ERROR_TOTAL_DESC = "Total SLM errors"
+PROMETHEUS_CHUNK_COUNT = "slm_chunks_total"
+PROMETHEUS_CHUNK_COUNT_DESC = "Number of chunks in streaming response"
+
+# Log message templates
+LOG_MSG_STARTING_CALL = "[SLM] starting {}: {}"
+LOG_MSG_COMPLETED_CALL = "[SLM] completed {}: {}"
+LOG_MSG_FAILED_CALL = "[SLM] failed: {}"
 
 
 # Get tracer
@@ -63,7 +133,7 @@ def set_atrribute_response(span: Span, response: ChatCompletionResponse):
 
 
 def set_atrribute_response_stream(span: Span, response: ChatCompletionStreamResponse):
-    """Set streaming chunk response attributes automatically."""
+    """Record streaming chunk as an event and accumulate tokens."""
     chunk_content = ""
     if (
         response.choices
@@ -73,8 +143,40 @@ def set_atrribute_response_stream(span: Span, response: ChatCompletionStreamResp
         chunk_content = response.choices[0].delta.content
 
     chunk_json = response.model_dump_json()
-    span.set_attribute(ATTR_CHUNK_SIZE, len(chunk_json))
-    span.set_attribute(ATTR_CHUNK_CONTENT_SIZE, len(chunk_content))
+
+    # Record chunk as an event
+    chunk_event = {
+        EVENT_ATTR_CHUNK_SIZE: len(chunk_json),
+        EVENT_ATTR_CHUNK_CONTENT_SIZE: len(chunk_content),
+        # EVENT_ATTR_CHUNK_CONTENT: chunk_content,
+        # EVENT_ATTR_FINISH_REASON: response.choices[0].finish_reason or 0
+        # if response.choices
+        # else None,
+    }
+    span.add_event(EVENT_CHUNK_GENERATED, chunk_event)
+
+    # Only count chunks with actual content
+    if not chunk_content:
+        return
+
+    # Accumulate tokens directly on the span
+    current_completion_tokens = span.attributes.get(ATTR_COMPLETION_TOKENS, 0)
+    span.set_attribute(ATTR_COMPLETION_TOKENS, current_completion_tokens + 1)
+
+    # Update total content length
+    current_output_length = span.attributes.get(ATTR_OUTPUT_CONTENT_LENGTH, 0)
+    span.set_attribute(
+        ATTR_OUTPUT_CONTENT_LENGTH, current_output_length + len(chunk_content)
+    )
+
+    # Update total tokens (assuming we have prompt tokens from initial setup)
+    prompt_tokens = span.attributes.get(ATTR_PROMPT_TOKENS, 0)
+    total_tokens = prompt_tokens + current_completion_tokens + 1
+    span.set_attribute(ATTR_TOTAL_TOKENS, total_tokens)
+
+    # Update chunk count
+    current_chunk_count = span.attributes.get(ATTR_CHUNK_COUNT, 0)
+    span.set_attribute(ATTR_CHUNK_COUNT, current_chunk_count + 1)
 
 
 @contextmanager
@@ -84,51 +186,41 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
         f"{SPAN_CHAT_COMPLETION}.{'streaming' if is_streaming else 'non_streaming'}"
     )
 
-    with tracer.start_as_current_span(span_name) as span:
+    # Pre-calculate attributes before starting span
+    messages_for_llm = [msg.model_dump() for msg in req.messages]
+    input_content_length = sum(len(msg.get("content", "")) for msg in messages_for_llm)
+
+    # Set initial attributes that will be available in on_start
+    initial_attributes = {
+        ATTR_MODEL: MODEL_NAME,
+        ATTR_STREAMING: is_streaming,
+        ATTR_MAX_TOKENS: req.max_tokens or 0,
+        ATTR_TEMPERATURE: req.temperature,
+        ATTR_INPUT_MESSAGES: len(messages_for_llm),
+        ATTR_INPUT_CONTENT_LENGTH: input_content_length,
+    }
+
+    # Add prompt tokens estimate for streaming
+    if is_streaming:
+        # Estimate prompt tokens for streaming (rough approximation: 1 token per 4 chars)
+        estimated_prompt_tokens = (
+            max(1, input_content_length // 4) if is_streaming else 0
+        )
+        initial_attributes[ATTR_PROMPT_TOKENS] = estimated_prompt_tokens
+
+    with tracer.start_as_current_span(span_name, attributes=initial_attributes) as span:
         try:
-            # Set initial attributes
-            messages_for_llm = [msg.model_dump() for msg in req.messages]
-            input_content_length = sum(
-                len(msg.get("content", "")) for msg in messages_for_llm
-            )
-
-            span.set_attribute(ATTR_MODEL, MODEL_NAME)
-            span.set_attribute(ATTR_STREAMING, is_streaming)
-            span.set_attribute(ATTR_MAX_TOKENS, req.max_tokens or 0)
-            span.set_attribute(ATTR_TEMPERATURE, req.temperature)
-            span.set_attribute(ATTR_INPUT_MESSAGES, len(messages_for_llm))
-            span.set_attribute(ATTR_INPUT_CONTENT_LENGTH, input_content_length)
-
             yield span, messages_for_llm
 
-        except Exception as e:
+        except Exception:
             # Use native error handling
-            span.set_status(Status(StatusCode.ERROR, str(e)))
+            error_str = traceback.format_exc()
+            span.set_status(Status(StatusCode.ERROR, error_str))
             span.set_attribute(ATTR_FORCE_SAMPLE, True)
             raise
 
 
-@contextmanager
-def slm_chunk_span(parent_span):
-    """Create chunk span that measures the actual next() call timing."""
-    # Get current chunk count from parent span attributes
-    current_chunk_count = parent_span.attributes.get(ATTR_CHUNK_COUNT, 0)
-    chunk_number = current_chunk_count + 1
-
-    # Update parent span chunk count
-    parent_span.set_attribute(ATTR_CHUNK_COUNT, chunk_number)
-
-    with tracer.start_as_current_span(
-        f"{SPAN_CHUNK_GENERATION}.{chunk_number}"
-    ) as span:
-        # Record first chunk time on parent span for first token delay calculation
-        if chunk_number == 1:
-            parent_span.set_attribute(ATTR_FIRST_CHUNK_TIME, span.start_time)
-
-        yield span
-
-
-def calculate_performance_metrics(span):
+def calculate_performance_metrics(span: Span):
     """Calculate performance metrics for a span after it has ended."""
     if not (span.end_time and span.start_time):
         return {}
@@ -141,42 +233,87 @@ def calculate_performance_metrics(span):
     completion_tokens = attrs.get(ATTR_COMPLETION_TOKENS, 0)
 
     metrics = {
-        ATTR_TOTAL_DURATION: duration_ms,
-        ATTR_TOKENS_PER_SECOND: 0,
-        ATTR_TOTAL_TOKENS_PER_SECOND: 0,
+        METRIC_TOTAL_DURATION: duration_ms,
+        METRIC_TOKENS_PER_SECOND: 0,
+        METRIC_TOTAL_TOKENS_PER_SECOND: 0,
     }
 
     # Calculate tokens per second
     if duration_ms > 0:
         duration_s = duration_ms / 1000
         if completion_tokens > 0:
-            metrics[ATTR_TOKENS_PER_SECOND] = completion_tokens / duration_s
+            metrics[METRIC_TOKENS_PER_SECOND] = completion_tokens / duration_s
         if total_tokens > 0:
-            metrics[ATTR_TOTAL_TOKENS_PER_SECOND] = total_tokens / duration_s
+            metrics[METRIC_TOTAL_TOKENS_PER_SECOND] = total_tokens / duration_s
 
     # Calculate streaming-specific metrics
     is_streaming = attrs.get(ATTR_STREAMING, False)
     if is_streaming:
         chunk_count = attrs.get(ATTR_CHUNK_COUNT, 0)
         if chunk_count > 0 and duration_ms > 0:
-            metrics[ATTR_CHUNK_DELAY] = duration_ms / chunk_count
+            metrics[METRIC_CHUNK_DELAY] = duration_ms / chunk_count
 
-        # First token delay
-        first_chunk_time = attrs.get(ATTR_FIRST_CHUNK_TIME)
-        if first_chunk_time:
-            first_token_delay = first_chunk_time - span.start_time
-            metrics[ATTR_FIRST_TOKEN_DELAY] = first_token_delay / 1_000_000
+        # Calculate chunk metrics from events
+        chunk_metrics = _calculate_chunk_metrics_from_events(span.events)
+        metrics.update(chunk_metrics)
+
+        # First token delay - find first chunk with content
+        first_content_event = None
+        for event in span.events:
+            if event.name == EVENT_CHUNK_GENERATED:
+                first_content_event = event
+                break
+
+        if first_content_event:
+            first_token_delay = first_content_event.timestamp - span.start_time
+            metrics[METRIC_FIRST_TOKEN_DELAY] = first_token_delay / 1_000_000
 
     return metrics
 
 
-def calculate_chunk_metrics(span):
-    """Calculate chunk-specific metrics for a chunk span after it has ended."""
-    if not (span.end_time and span.start_time):
+def _calculate_chunk_metrics_from_events(events):
+    """Calculate chunk-related metrics from span events."""
+    chunk_events = [e for e in events if e.name == EVENT_CHUNK_GENERATED]
+
+    if not chunk_events:
         return {}
 
-    chunk_duration_ms = (span.end_time - span.start_time) / 1_000_000
-    return {ATTR_CHUNK_DURATION: chunk_duration_ms}
+    chunk_sizes = []
+    chunk_content_sizes = []
+    chunks_with_content = 0
+    empty_chunks = 0
+
+    for event in chunk_events:
+        attrs = event.attributes or {}
+
+        chunk_size = attrs.get(EVENT_ATTR_CHUNK_SIZE, 0)
+        chunk_content_size = attrs.get(EVENT_ATTR_CHUNK_CONTENT_SIZE, 0)
+        # chunk_content = attrs.get(EVENT_ATTR_CHUNK_CONTENT, "")
+
+        chunk_sizes.append(chunk_size)
+        chunk_content_sizes.append(chunk_content_size)
+
+        if chunk_content_size:
+            chunks_with_content += 1
+        else:
+            empty_chunks += 1
+
+    metrics = {}
+
+    if chunk_sizes:
+        metrics[METRIC_AVG_CHUNK_SIZE] = sum(chunk_sizes) / len(chunk_sizes)
+        metrics[METRIC_MAX_CHUNK_SIZE] = max(chunk_sizes)
+        metrics[METRIC_MIN_CHUNK_SIZE] = min(chunk_sizes)
+
+    if chunk_content_sizes:
+        metrics[METRIC_AVG_CHUNK_CONTENT_SIZE] = sum(chunk_content_sizes) / len(
+            chunk_content_sizes
+        )
+
+    metrics[METRIC_CHUNKS_WITH_CONTENT] = chunks_with_content
+    metrics[METRIC_EMPTY_CHUNKS] = empty_chunks
+
+    return metrics
 
 
 class SLMLoggingSpanProcessor(SpanProcessor):
@@ -193,13 +330,13 @@ class SLMLoggingSpanProcessor(SpanProcessor):
         attrs = span.attributes or {}
         is_streaming = attrs.get(ATTR_STREAMING, False)
         log_data = {
-            "max_tokens": attrs.get(ATTR_MAX_TOKENS, 0),
-            "temperature": attrs.get(ATTR_TEMPERATURE, 0.0),
-            "input_messages": attrs.get(ATTR_INPUT_MESSAGES, 0),
-            "input_content_length": attrs.get(ATTR_INPUT_CONTENT_LENGTH, 0),
+            LOG_KEY_MAX_TOKENS: attrs.get(ATTR_MAX_TOKENS, 0),
+            LOG_KEY_TEMPERATURE: attrs.get(ATTR_TEMPERATURE, 0.0),
+            LOG_KEY_INPUT_MESSAGES: attrs.get(ATTR_INPUT_MESSAGES, 0),
+            LOG_KEY_INPUT_CONTENT_LENGTH: attrs.get(ATTR_INPUT_CONTENT_LENGTH, 0),
         }
         mode = "streaming" if is_streaming else "non-streaming"
-        self.logger.info(f"Starting {mode} SLM call: {log_data}")
+        self.logger.info(LOG_MSG_STARTING_CALL.format(mode, log_data))
 
     def on_end(self, span):
         """Log span completion or error."""
@@ -208,43 +345,33 @@ class SLMLoggingSpanProcessor(SpanProcessor):
 
         attrs = span.attributes or {}
 
-        # Handle chunk spans
-        if span.name.startswith(SPAN_CHUNK_GENERATION):
-            # Calculate and set chunk metrics
-            chunk_metrics = calculate_chunk_metrics(span)
-            for attr_name, value in chunk_metrics.items():
-                span.set_attribute(attr_name, value)
+        # Skip non-main spans (we no longer use chunk spans)
+        if not span.name.startswith(SPAN_CHAT_COMPLETION):
             return
 
         # Use native error status
         if span.status.status_code == StatusCode.ERROR:
-            self.logger.error(f"SLM call failed: {span.status.description}")
+            self.logger.error(LOG_MSG_FAILED_CALL.format(span.status.description))
             return
 
-        # Log success for main spans only
-        if not span.name.startswith(SPAN_CHAT_COMPLETION):
-            return
-
-        # Calculate and set performance metrics
+        # Calculate performance metrics (but don't try to set them on ended span)
         performance_metrics = calculate_performance_metrics(span)
-        for attr_name, value in performance_metrics.items():
-            span.set_attribute(attr_name, value)
-
-        # Refresh attrs after setting new attributes
-        attrs = span.attributes or {}
+        # Merge calculated metrics with existing attributes for logging
+        attrs = dict(attrs)
+        attrs.update(performance_metrics)
         is_streaming = attrs.get(ATTR_STREAMING, False)
         mode = "streaming" if is_streaming else "non-streaming"
 
         log_data = {
-            "duration_ms": round(attrs.get(ATTR_TOTAL_DURATION, 0), 2),
-            "output_content_length": attrs.get(ATTR_OUTPUT_CONTENT_LENGTH, 0),
-            "total_tokens": attrs.get(ATTR_TOTAL_TOKENS, 0),
-            "completion_tokens": attrs.get(ATTR_COMPLETION_TOKENS, 0),
-            "completion_tokens_per_second": round(
-                attrs.get(ATTR_TOKENS_PER_SECOND, 0), 2
+            LOG_KEY_DURATION_MS: round(attrs.get(METRIC_TOTAL_DURATION, 0), 2),
+            LOG_KEY_OUTPUT_CONTENT_LENGTH: attrs.get(ATTR_OUTPUT_CONTENT_LENGTH, 0),
+            LOG_KEY_TOTAL_TOKENS: attrs.get(ATTR_TOTAL_TOKENS, 0),
+            LOG_KEY_COMPLETION_TOKENS: attrs.get(ATTR_COMPLETION_TOKENS, 0),
+            LOG_KEY_COMPLETION_TOKENS_PER_SECOND: round(
+                attrs.get(METRIC_TOKENS_PER_SECOND, 0), 2
             ),
-            "total_tokens_per_second": round(
-                attrs.get(ATTR_TOTAL_TOKENS_PER_SECOND, 0), 2
+            LOG_KEY_TOTAL_TOKENS_PER_SECOND: round(
+                attrs.get(METRIC_TOTAL_TOKENS_PER_SECOND, 0), 2
             ),
         }
 
@@ -252,15 +379,27 @@ class SLMLoggingSpanProcessor(SpanProcessor):
         if is_streaming:
             log_data.update(
                 {
-                    "chunk_count": attrs.get(ATTR_CHUNK_COUNT, 0),
-                    "avg_chunk_delay_ms": round(attrs.get(ATTR_CHUNK_DELAY, 0), 2),
-                    "first_token_delay_ms": round(
-                        attrs.get(ATTR_FIRST_TOKEN_DELAY, 0), 2
+                    LOG_KEY_CHUNK_COUNT: attrs.get(ATTR_CHUNK_COUNT, 0),
+                    LOG_KEY_AVG_CHUNK_DELAY_MS: round(
+                        attrs.get(METRIC_CHUNK_DELAY, 0), 2
                     ),
+                    LOG_KEY_FIRST_TOKEN_DELAY_MS: round(
+                        attrs.get(METRIC_FIRST_TOKEN_DELAY, 0), 2
+                    ),
+                    LOG_KEY_AVG_CHUNK_SIZE: round(
+                        attrs.get(METRIC_AVG_CHUNK_SIZE, 0), 2
+                    ),
+                    LOG_KEY_AVG_CHUNK_CONTENT_SIZE: round(
+                        attrs.get(METRIC_AVG_CHUNK_CONTENT_SIZE, 0), 2
+                    ),
+                    LOG_KEY_CHUNKS_WITH_CONTENT: attrs.get(
+                        METRIC_CHUNKS_WITH_CONTENT, 0
+                    ),
+                    LOG_KEY_EMPTY_CHUNKS: attrs.get(METRIC_EMPTY_CHUNKS, 0),
                 }
             )
 
-        self.logger.info(f"Completed {mode} SLM call: {log_data}")
+        self.logger.info(LOG_MSG_COMPLETED_CALL.format(mode, log_data))
 
     def shutdown(self):
         pass
@@ -275,71 +414,71 @@ class SLMMetricsSpanProcessor(SpanProcessor):
     def __init__(self):
         # Duration metrics
         self.completion_duration = Histogram(
-            "slm_completion_duration_seconds",
-            "SLM completion duration in seconds",
+            PROMETHEUS_COMPLETION_DURATION,
+            PROMETHEUS_COMPLETION_DURATION_DESC,
             labelnames=["model", "streaming", "status"],
             buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0],
         )
 
         # Token metrics
         self.token_count = Histogram(
-            "slm_tokens_total",
-            "Total tokens processed",
+            PROMETHEUS_TOKEN_COUNT,
+            PROMETHEUS_TOKEN_COUNT_DESC,
             labelnames=["model", "streaming", "token_type"],
             buckets=[10, 50, 100, 500, 1000, 2000, 5000, 10000],
         )
 
         # Throughput metrics - completion tokens (generation rate)
         self.completion_tokens_per_second = Histogram(
-            "slm_completion_tokens_per_second",
-            "Completion token generation rate (tokens/sec)",
+            PROMETHEUS_COMPLETION_TOKENS_PER_SECOND,
+            PROMETHEUS_COMPLETION_TOKENS_PER_SECOND_DESC,
             labelnames=["model", "streaming"],
             buckets=[1, 5, 10, 20, 50, 100, 200, 500],
         )
 
         # Throughput metrics - total tokens (including prompt processing)
         self.total_tokens_per_second = Histogram(
-            "slm_total_tokens_per_second",
-            "Total token throughput including prompt processing (tokens/sec)",
+            PROMETHEUS_TOTAL_TOKENS_PER_SECOND,
+            PROMETHEUS_TOTAL_TOKENS_PER_SECOND_DESC,
             labelnames=["model", "streaming"],
             buckets=[1, 5, 10, 20, 50, 100, 200, 500],
         )
 
         # First token delay (streaming only)
         self.first_token_delay = Histogram(
-            "slm_first_token_delay_ms",
-            "Time to first token in milliseconds (streaming)",
+            PROMETHEUS_FIRST_TOKEN_DELAY,
+            PROMETHEUS_FIRST_TOKEN_DELAY_DESC,
             labelnames=["model"],
             buckets=[10, 50, 100, 200, 500, 1000, 2000, 5000],
         )
 
         # Chunk delay metrics (streaming only)
         self.chunk_delay = Histogram(
-            "slm_chunk_delay_ms",
-            "Average chunk delay in milliseconds (streaming)",
+            PROMETHEUS_CHUNK_DELAY,
+            PROMETHEUS_CHUNK_DELAY_DESC,
             labelnames=["model"],
             buckets=[1, 5, 10, 20, 50, 100, 200, 500],
         )
 
         # Chunk duration metrics
         self.chunk_duration = Histogram(
-            "slm_chunk_duration_ms",
-            "Individual chunk processing duration in milliseconds",
+            PROMETHEUS_CHUNK_DURATION,
+            PROMETHEUS_CHUNK_DURATION_DESC,
             labelnames=["model"],
             buckets=[1, 5, 10, 20, 50, 100, 200, 500],
         )
 
         # Error rate
         self.error_total = Counter(
-            "slm_errors_total",
-            "Total SLM errors",
+            PROMETHEUS_ERROR_TOTAL,
+            PROMETHEUS_ERROR_TOTAL_DESC,
             labelnames=["model", "streaming", "error_type"],
         )
 
         # Chunk count for streaming
         self.chunk_count = Histogram(
-            "slm_chunks_total",
-            "Number of chunks in streaming response",
+            PROMETHEUS_CHUNK_COUNT,
+            PROMETHEUS_CHUNK_COUNT_DESC,
             labelnames=["model"],
             buckets=[1, 5, 10, 20, 50, 100, 200, 500],
         )
@@ -355,22 +494,21 @@ class SLMMetricsSpanProcessor(SpanProcessor):
         attrs = span.attributes or {}
         model = attrs.get(ATTR_MODEL, "unknown")
 
-        # Handle chunk spans
-        if span.name.startswith(SPAN_CHUNK_GENERATION):
-            chunk_duration_ms = attrs.get(ATTR_CHUNK_DURATION, 0)
-            if chunk_duration_ms > 0:
-                self.chunk_duration.labels(model=model).observe(chunk_duration_ms)
-            return
-
-        # Record metrics for main completion spans
+        # Skip non-main spans (we no longer use chunk spans)
         if not span.name.startswith(SPAN_CHAT_COMPLETION):
             return
 
         is_streaming = attrs.get(ATTR_STREAMING, False)
         streaming_label = "streaming" if is_streaming else "non_streaming"
 
-        # Duration using pre-calculated attribute
-        duration_ms = attrs.get(ATTR_TOTAL_DURATION, 0)
+        # Calculate performance metrics first
+        performance_metrics = calculate_performance_metrics(span)
+        # Merge calculated metrics with existing attributes
+        all_attrs = dict(attrs)
+        all_attrs.update(performance_metrics)
+
+        # Duration using calculated metric
+        duration_ms = all_attrs.get(METRIC_TOTAL_DURATION, 0)
         duration_s = duration_ms / 1000 if duration_ms > 0 else 0
         status = "success" if span.status.status_code == StatusCode.OK else "error"
 
@@ -391,9 +529,8 @@ class SLMMetricsSpanProcessor(SpanProcessor):
             return
 
         # Token metrics
-        prompt_tokens = attrs.get(ATTR_PROMPT_TOKENS, 0)
-        completion_tokens = attrs.get(ATTR_COMPLETION_TOKENS, 0)
-        # total_tokens = attrs.get(ATTR_TOTAL_TOKENS, 0)
+        prompt_tokens = all_attrs.get(ATTR_PROMPT_TOKENS, 0)
+        completion_tokens = all_attrs.get(ATTR_COMPLETION_TOKENS, 0)
 
         if prompt_tokens > 0:
             self.token_count.labels(
@@ -405,14 +542,14 @@ class SLMMetricsSpanProcessor(SpanProcessor):
                 model=model, streaming=streaming_label, token_type="completion"
             ).observe(completion_tokens)
 
-        # Throughput metrics using pre-calculated attributes
-        completion_tps = attrs.get(ATTR_TOKENS_PER_SECOND, 0)
+        # Throughput metrics using calculated metrics
+        completion_tps = all_attrs.get(METRIC_TOKENS_PER_SECOND, 0)
         if completion_tps > 0:
             self.completion_tokens_per_second.labels(
                 model=model, streaming=streaming_label
             ).observe(completion_tps)
 
-        total_tps = attrs.get(ATTR_TOTAL_TOKENS_PER_SECOND, 0)
+        total_tps = all_attrs.get(METRIC_TOTAL_TOKENS_PER_SECOND, 0)
         if total_tps > 0:
             self.total_tokens_per_second.labels(
                 model=model, streaming=streaming_label
@@ -421,17 +558,17 @@ class SLMMetricsSpanProcessor(SpanProcessor):
         # Streaming-specific metrics
         if is_streaming:
             # Chunk count
-            chunk_count = attrs.get(ATTR_CHUNK_COUNT, 0)
+            chunk_count = all_attrs.get(ATTR_CHUNK_COUNT, 0)
             if chunk_count > 0:
                 self.chunk_count.labels(model=model).observe(chunk_count)
 
             # First token delay
-            first_token_delay_ms = attrs.get(ATTR_FIRST_TOKEN_DELAY, 0)
+            first_token_delay_ms = all_attrs.get(METRIC_FIRST_TOKEN_DELAY, 0)
             if first_token_delay_ms > 0:
                 self.first_token_delay.labels(model=model).observe(first_token_delay_ms)
 
             # Average chunk delay
-            chunk_delay_ms = attrs.get(ATTR_CHUNK_DELAY, 0)
+            chunk_delay_ms = all_attrs.get(METRIC_CHUNK_DELAY, 0)
             if chunk_delay_ms > 0:
                 self.chunk_delay.labels(model=model).observe(chunk_delay_ms)
 

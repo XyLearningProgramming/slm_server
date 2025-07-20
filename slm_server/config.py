@@ -40,6 +40,10 @@ class TraceSettings(BaseModel):
     sample_rate: float = Field(
         0.1, description="Trace sampling rate (0.0-1.0), default 10%"
     )
+    excluded_urls: list[str] = Field(
+        ["/metrics", "/health"],
+        description="List of URLs to exclude from tracing",
+    )
 
 
 class Settings(BaseSettings):
