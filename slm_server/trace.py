@@ -65,7 +65,9 @@ def setup_tracing(app: FastAPI, settings: TraceSettings) -> None:
     tracer_provider.add_span_processor(metrics_processor)
 
     # Instrument FastAPI with tracing
-    excluded_urls_str = ",".join(settings.excluded_urls) if settings.excluded_urls else ""
+    excluded_urls_str = (
+        ",".join(settings.excluded_urls) if settings.excluded_urls else ""
+    )
     FastAPIInstrumentor.instrument_app(
         app, tracer_provider=tracer_provider, excluded_urls=excluded_urls_str
     )

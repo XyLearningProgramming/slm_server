@@ -203,7 +203,8 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
 
     # Add prompt tokens estimate for streaming
     if is_streaming:
-        # Estimate prompt tokens for streaming (rough approximation: 1 token per 4 chars)
+        # Estimate prompt tokens for streaming
+        # (rough approximation: 1 token per 4 chars)
         estimated_prompt_tokens = (
             max(1, input_content_length // 4) if is_streaming else 0
         )
@@ -487,7 +488,7 @@ class SLMMetricsSpanProcessor(SpanProcessor):
     def on_start(self, span, parent_context=None):
         pass
 
-    def on_end(self, span):
+    def on_end(self, span):  # noqa: C901
         """Record metrics on span end."""
         if not span.name.startswith(SPAN_PREFIX):
             return

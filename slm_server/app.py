@@ -104,7 +104,8 @@ async def run_llm_streaming(
             stream=True,
         )
 
-        # Use traced iterator that automatically handles chunk spans and parent span updates
+        # Use traced iterator that automatically handles chunk spans
+        # and parent span updates
         for chunk in completion_stream:
             response_model = ChatCompletionStreamResponse.model_validate(chunk)
             set_atrribute_response_stream(span, response_model)
