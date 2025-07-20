@@ -87,8 +87,6 @@ jobs:
               continue
             fi
             if [ -n "$key" ] && [ -n "$value" ]; then
-              # Mask sensitive values in GitHub Actions logs
-              echo "::add-mask::$value"
               echo "  $key: \"$value\""
             fi
           done >> $GITHUB_OUTPUT
