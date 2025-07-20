@@ -159,24 +159,25 @@ def set_atrribute_response_stream(span: Span, response: ChatCompletionStreamResp
     if not chunk_content:
         return
 
-    # Accumulate tokens directly on the span
-    current_completion_tokens = span.attributes.get(ATTR_COMPLETION_TOKENS, 0)
-    span.set_attribute(ATTR_COMPLETION_TOKENS, current_completion_tokens + 1)
+    # Accumulate tokens directly on the span (only for recording spans)
+    if span.is_recording():
+        current_completion_tokens = span.attributes.get(ATTR_COMPLETION_TOKENS, 0)
+        span.set_attribute(ATTR_COMPLETION_TOKENS, current_completion_tokens + 1)
 
-    # Update total content length
-    current_output_length = span.attributes.get(ATTR_OUTPUT_CONTENT_LENGTH, 0)
-    span.set_attribute(
-        ATTR_OUTPUT_CONTENT_LENGTH, current_output_length + len(chunk_content)
-    )
+        # Update total content length
+        current_output_length = span.attributes.get(ATTR_OUTPUT_CONTENT_LENGTH, 0)
+        span.set_attribute(
+            ATTR_OUTPUT_CONTENT_LENGTH, current_output_length + len(chunk_content)
+        )
 
-    # Update total tokens (assuming we have prompt tokens from initial setup)
-    prompt_tokens = span.attributes.get(ATTR_PROMPT_TOKENS, 0)
-    total_tokens = prompt_tokens + current_completion_tokens + 1
-    span.set_attribute(ATTR_TOTAL_TOKENS, total_tokens)
+        # Update total tokens (assuming we have prompt tokens from initial setup)
+        prompt_tokens = span.attributes.get(ATTR_PROMPT_TOKENS, 0)
+        total_tokens = prompt_tokens + current_completion_tokens + 1
+        span.set_attribute(ATTR_TOTAL_TOKENS, total_tokens)
 
-    # Update chunk count
-    current_chunk_count = span.attributes.get(ATTR_CHUNK_COUNT, 0)
-    span.set_attribute(ATTR_CHUNK_COUNT, current_chunk_count + 1)
+        # Update chunk count
+        current_chunk_count = span.attributes.get(ATTR_CHUNK_COUNT, 0)
+        span.set_attribute(ATTR_CHUNK_COUNT, current_chunk_count + 1)
 
 
 @contextmanager
