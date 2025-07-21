@@ -72,7 +72,7 @@ jobs:
         # Find the tag with SHA suffix (format: branch-sha)
         TAGS='${{ steps.meta.outputs.tags }}'
         SHA_TAG=$(echo "$TAGS" | grep -E '.*-[a-f0-9]{7}$' | head -1 | cut -d':' -f2)
-        echo $SHA_TAG >> $GITHUB_OUTPUT
+        echo "tag=$SHA_TAG" >> $GITHUB_OUTPUT
         
     - name: Deploy with Helm
       uses: ./.github/actions/helm-deploy
