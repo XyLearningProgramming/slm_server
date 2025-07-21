@@ -81,7 +81,7 @@ env: {}
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 resources:
   limits:
-    cpu: 2.5
+    cpu: 2
     memory: 800Mi
   # requests:
   #   cpu: 1
