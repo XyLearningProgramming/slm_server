@@ -1,0 +1,49 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up UV
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "latest"
+        enable-cache: true
+        cache-suffix: slm_server
+        python-version: 3.13
+      
+    - name: Install dependencies
+      run: uv sync --dev
+      
+    - name: Minimize uv cache
+      run: uv cache prune --ci
+      
+    - name: Build
+      run: uv build
+      
+    - name: Run tests with coverage (excluding e2e)
+      run: |
+        uv run pytest tests/ --ignore=tests/e2e/ --cov=slm_server --cov-report=xml --cov-report=term-missing
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+      
+    - name: Lint with ruff
+      run: |
+        uv run ruff check .
+        uv run ruff format --check .

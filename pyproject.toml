@@ -1,0 +1,55 @@
+[project]
+name = "slm_server"
+version = "1.0.0"
+description = "model server to serve a small language model as api with simple configs and a deploy chart"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.116.1",
+    "llama-cpp-python>=0.3.13",
+    "opentelemetry-instrumentation-logging>=0.50b0",
+    "opentelemetry-instrumentation-fastapi>=0.50b0",
+    "pydantic-settings>=2.10.1",
+    "uvicorn>=0.35.0",
+    "opentelemetry-api>=1.35.0",
+    "opentelemetry-sdk>=1.35.0",
+    "opentelemetry-exporter-otlp>=1.35.0",
+    "opentelemetry-exporter-prometheus>=0.49b0",
+    "prometheus-client>=0.22.1",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "psutil>=6.1.0",
+]
+
+[tool.ruff.lint]
+select = ["C", "E", "F", "W"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.4.1",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.12.3",
+]
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["tests"]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["slm_server*"]
+
+[tool.coverage.run]
+source = ["slm_server"]
+omit = ["tests/*", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]

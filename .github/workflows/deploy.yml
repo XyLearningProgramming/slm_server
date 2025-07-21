@@ -1,0 +1,32 @@
+name: Manual Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy'
+        required: true
+        type: string
+
+env:
+  NAMESPACE: backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: prod
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy with Helm
+      uses: ./.github/actions/helm-deploy
+      with:
+        image_tag: ${{ github.event.inputs.image_tag }}
+        registry_repository: ${{ secrets.REGISTRY_REPOSITORY }}
+        kube_config_data: ${{ secrets.KUBE_CONFIG_DATA }}
+        helm_values_env: ${{ secrets.HELM_VALUES_ENV }}
+        helm_values_persistence_hostpath: ${{ secrets.HELM_VALUES_PERSISTENCE_HOSTPATH }}
+        helm_values_persistence_nodename: ${{ secrets.HELM_VALUES_PERSISTENCE_NODENAME }}
+        namespace: ${{ env.NAMESPACE }}

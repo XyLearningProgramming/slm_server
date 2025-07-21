@@ -1,0 +1,99 @@
+# Default values for slm-server.
+
+replicaCount: 1
+
+image:
+  repository: x3huang/slm-server
+  pullPolicy: IfNotPresent
+  # Overridden by the CI/CD pipeline
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# ServiceMonitor configuration for Prometheus
+serviceMonitor:
+  enabled: true
+  path: /metrics
+  interval: 71s
+  scrapeTimeout: 30s
+  labels: {}
+  annotations: {}
+  relabelings: []
+  metricRelabelings: []
+
+persistence:
+  enabled: true
+  # The absolute path on the host node where the model data is stored.
+  hostPath: "/mnt/disks/ssd1/slm-data"
+  # The name of the node where the storage is located.
+  # This should be left empty and set during deployment.
+  # nodeName: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi # Adjust based on your model size
+  mountPath: /app/models
+
+# We are not using ingress or hpa for now
+ingress:
+  enabled: false
+
+hpa:
+  enabled: false
+
+# Environment variables to inject into the container
+# Example configuration for SLM server settings
+env: {}
+  # Application settings
+  # SLM_MODEL_PATH: "/app/models/Qwen3-0.6B-Q8_0.gguf"
+  # SLM_N_CTX: "4096"
+  # SLM_N_THREADS: "2"
+  # SLM_SEED: "42"
+  # SLM_S_TIMEOUT: "1"
+  
+  # Logging settings
+  # SLM_LOGGING__VERBOSE: "true"
+  
+  # Tracing settings
+  # SLM_TRACING__ENABLED: "true"
+  # SLM_TRACING__ENDPOINT: "https://tempo.example.com/api/traces"
+  # SLM_TRACING__USERNAME: "your-username"
+  # SLM_TRACING__PASSWORD: "your-password"
+
+# Resource requests and limits for the container.
+# See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+resources:
+  limits:
+    cpu: 2.5
+    memory: 800Mi
+  # requests:
+  #   cpu: 1
+  #   memory: 512Mi
+
+# Readiness and liveness probes configuration
+probes:
+  readiness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  liveness:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3

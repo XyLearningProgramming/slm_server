@@ -1,0 +1,45 @@
+name: Manual Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Revision to rollback to (leave empty for previous release)'
+        required: false
+        type: string
+
+env:
+  NAMESPACE: backend
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: prod
+    
+    steps:
+    - name: Set up Kubernetes config
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+        
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+        
+    - name: Rollback deployment
+      run: |
+        if [ -n "${{ github.event.inputs.revision }}" ]; then
+          echo "Rolling back to revision ${{ github.event.inputs.revision }}"
+          helm rollback slm-server ${{ github.event.inputs.revision }} --namespace ${{ env.NAMESPACE }} --wait --timeout 5m
+        else
+          echo "Rolling back to previous release"
+          helm rollback slm-server --namespace ${{ env.NAMESPACE }} --wait --timeout 5m
+        fi
+        
+    - name: Verify rollback
+      run: |
+        kubectl rollout status deployment/slm-server -n ${{ env.NAMESPACE }} --timeout=300s
+        kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=slm-server
+        echo "Rollback completed successfully"
