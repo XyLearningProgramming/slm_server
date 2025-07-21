@@ -11,7 +11,7 @@
 
 ## ✨ Features
 
-[Thin wrapper around llama cpp](./docs/20250712_slm_img1.jpg)
+![Thin wrapper around llama cpp](./docs/20250712_slm_img1.jpg)
 
 - 🔌 **OpenAI-compatible API** - Drop-in replacement with `/chat/completions` endpoint and streaming support
 - ⚡ **Llama.cpp integration** - High-performance inference optimized for limited CPU and memory resources
