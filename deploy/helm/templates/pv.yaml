@@ -10,7 +10,7 @@ spec:
     storage: {{ .Values.persistence.size }}
   accessModes:
     - {{ .Values.persistence.accessMode }}
-  hostPath:
+  local:
     path: {{ .Values.persistence.hostPath }}
   nodeAffinity:
     required:

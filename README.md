@@ -1,15 +1,17 @@
-# 🤖 SLM Server
+# Small-Language-Model Server
 
 [![CI Pipeline](https://github.com/XyLearningProgramming/slm_server/actions/workflows/ci.yml/badge.svg)](https://github.com/XyLearningProgramming/slm_server/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/XyLearningProgramming/slm_server/branch/main/graph/badge.svg)](https://codecov.io/gh/XyLearningProgramming/slm_server)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/r/x3huang/slm_server)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-> 🚀 **Production-ready FastAPI model server** for small language models with OpenAI-compatible API, built-in observability, and enterprise-grade deployment tools.
+🚀 A light model server that serves small language models (default: `Qwen3-0.6B-GGUF`) as a **thin wrapper** around `llama-cpp` exposing the OpenAI-compatible `/chat/completions` API. Core logic is just <100 lines under `./slm_server/app.py`!
 
-A light model server that serves small language models (default: `Qwen3-0.6B-GGUF`) using `llama-cpp` via the OpenAI-compatible `/chat/completions` API. Designed for resource-constrained environments with comprehensive monitoring and deployment automation.
+> This is still a WIP project. Issues, pull-requests are welcome. I mainly use this repo to deploy a SLM model as part of the backend on my own site [x3huang.dev](https://x3huang.dev/) while trying my best to keep this repo model-agonistic. 
 
 ## ✨ Features
+
+![Thin wrapper around llama cpp](./docs/20250712_slm_img1.jpg)
 
 - 🔌 **OpenAI-compatible API** - Drop-in replacement with `/chat/completions` endpoint and streaming support
 - ⚡ **Llama.cpp integration** - High-performance inference optimized for limited CPU and memory resources
@@ -50,7 +52,7 @@ docker run -p 8000:8000 -v $(pwd)/models:/app/models slm_server
 ### Test the API
 
 ```bash
-curl -X POST http://localhost:8000/chat/completions \
+curl -X POST http://localhost:8000/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen",
