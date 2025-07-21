@@ -136,11 +136,11 @@ services:
 # Unit tests
 uv run pytest tests/ --ignore=tests/e2e/
 
-# End-to-end tests
-uv run pytest tests/e2e/
+# End-to-end tests (with server pulled up)
+uv run python ./tests/e2e/main.py
 
 # With coverage
-uv run pytest --cov=slm_server --cov-report=html
+uv run pytest tests/ --ignore=tests/e2e/ --cov=slm_server --cov-report=html --cov-report=term-missing
 ```
 
 ### Code Quality

@@ -27,6 +27,7 @@ select = ["C", "E", "F", "W"]
 dev = [
     "httpx>=0.28.1",
     "pytest>=8.4.1",
+    "pytest-cov>=4.0.0",
     "ruff>=0.12.3",
 ]
 
@@ -40,3 +41,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["slm_server*"]
+
+[tool.coverage.run]
+source = ["slm_server"]
+omit = ["tests/*", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
