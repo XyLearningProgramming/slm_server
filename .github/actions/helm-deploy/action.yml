@@ -103,6 +103,13 @@ runs:
         # Clean up temporary file
         rm "$temp_values"
 
+    - name: Cleanup on cancellation
+      if: cancelled()
+      shell: bash
+      run: |
+        echo "Workflow cancelled, attempting helm rollback..."
+        helm rollback slm-server 0 -n ${{ inputs.namespace }} --wait --timeout 5m || true
+
     - name: Verify deployment
       shell: bash
       run: |
