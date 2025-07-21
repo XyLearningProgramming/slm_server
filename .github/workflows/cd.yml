@@ -76,3 +76,4 @@ jobs:
         helm_values_persistence_hostpath: ${{ secrets.HELM_VALUES_PERSISTENCE_HOSTPATH }}
         helm_values_persistence_nodename: ${{ secrets.HELM_VALUES_PERSISTENCE_NODENAME }}
         namespace: ${{ env.NAMESPACE }}
+        github_token: ${{ secrets.GITHUB_TOKEN }}

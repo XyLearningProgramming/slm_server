@@ -24,6 +24,9 @@ inputs:
     description: 'Kubernetes namespace'
     required: true
     default: 'backend'
+  github_token:
+    description: 'GitHub token for Helm installation'
+    required: true
 
 runs:
   using: 'composite'
@@ -33,7 +36,7 @@ runs:
       with:
         version: 'latest'
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ inputs.github_token }}
         
     - name: Set up Kubernetes config
       shell: bash
