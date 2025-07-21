@@ -105,3 +105,6 @@ probes:
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
+
+strategy:
+  type: Recreate
