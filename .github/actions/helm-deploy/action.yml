@@ -32,7 +32,7 @@ runs:
       shell: bash
       run: |
         mkdir -p $HOME/.kube
-        echo "${{ inputs.kube_config_data }}" | base64 -d > $HOME/.kube/config
+        echo "${{ inputs.kube_config_data }}" > $HOME/.kube/config
         chmod 600 $HOME/.kube/config
         
     - name: Install Helm
