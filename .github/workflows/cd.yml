@@ -19,6 +19,7 @@ on:
 
 env:
   REGISTRY: docker.io
+  NAMESPACE: backend
 
 jobs:
   deploy:
@@ -65,64 +66,13 @@ jobs:
           type=gha,mode=max
           type=registry,ref=${{ secrets.REGISTRY_REPOSITORY }}:buildcache,mode=max
         
-    - name: Set up Kubernetes config
-      run: |
-        mkdir -p $HOME/.kube
-        echo "${{ secrets.KUBE_CONFIG_DATA }}" | base64 -d > $HOME/.kube/config
-        chmod 600 $HOME/.kube/config
-        
-    - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
-        
-    - name: Parse environment variables
-      id: parse_env
-      run: |
-        if [ -n "${{ secrets.HELM_VALUES_ENV }}" ]; then
-          echo "helm_env_values<<EOF" >> $GITHUB_OUTPUT
-          echo "${{ secrets.HELM_VALUES_ENV }}" | while IFS='=' read -r key value; do
-            # Skip commented lines and empty lines
-            if [[ "$key" =~ ^#.*$ ]] || [ -z "$key" ]; then
-              continue
-            fi
-            if [ -n "$key" ] && [ -n "$value" ]; then
-              echo "  $key: \"$value\""
-            fi
-          done >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-        else
-          echo "helm_env_values=" >> $GITHUB_OUTPUT
-        fi
-        
     - name: Deploy with Helm
-      run: |
-        # Get the image tag from the metadata step
-        IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1 | cut -d':' -f2)
-        
-        # Create temporary values file
-        cat > /tmp/override-values.yaml << EOF
-        image:
-          repository: ${{ secrets.REGISTRY_REPOSITORY }}
-          tag: "$IMAGE_TAG"
-        
-        persistence:
-          hostPath: "${{ secrets.HELM_VALUES_PERSISTENCE_HOSTPATH }}"
-          nodeName: "${{ secrets.HELM_VALUES_PERSISTENCE_NODENAME }}"
-        
-        env:
-        ${{ steps.parse_env.outputs.helm_env_values }}
-        EOF
-        
-        # Deploy using Helm
-        helm upgrade --install slm-server ./deploy/helm \
-          --namespace default \
-          --create-namespace \
-          --values /tmp/override-values.yaml \
-          --wait \
-          --timeout 10m
-          
-    - name: Verify deployment
-      run: |
-        kubectl rollout status deployment/slm-server -n default --timeout=300s
-        kubectl get pods -n default -l app.kubernetes.io/name=slm-server
+      uses: ./.github/actions/helm-deploy
+      with:
+        image_tag: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        registry_repository: ${{ secrets.REGISTRY_REPOSITORY }}
+        kube_config_data: ${{ secrets.KUBE_CONFIG_DATA }}
+        helm_values_env: ${{ secrets.HELM_VALUES_ENV }}
+        helm_values_persistence_hostpath: ${{ secrets.HELM_VALUES_PERSISTENCE_HOSTPATH }}
+        helm_values_persistence_nodename: ${{ secrets.HELM_VALUES_PERSISTENCE_NODENAME }}
+        namespace: ${{ env.NAMESPACE }}
