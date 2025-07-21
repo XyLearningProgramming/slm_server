@@ -27,44 +27,61 @@ inputs:
 
 runs:
   using: 'composite'
-  steps:
+  steps:        
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+        
     - name: Set up Kubernetes config
       shell: bash
       run: |
         mkdir -p $HOME/.kube
         echo "${{ inputs.kube_config_data }}" > $HOME/.kube/config
         chmod 600 $HOME/.kube/config
-        
-    - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
-        
+    
     - name: Parse environment variables
       id: parse_env
       shell: bash
       run: |
         if [ -n "${{ inputs.helm_values_env }}" ]; then
-          echo "helm_env_values<<EOF" >> $GITHUB_OUTPUT
+          # Create temporary file to avoid exposing secrets in logs
+          temp_file=$(mktemp)
           echo "${{ inputs.helm_values_env }}" | while IFS='=' read -r key value; do
             # Skip commented lines and empty lines
             if [[ "$key" =~ ^#.*$ ]] || [ -z "$key" ]; then
               continue
             fi
             if [ -n "$key" ] && [ -n "$value" ]; then
-              echo "  $key: \"$value\""
+              echo "  $key: \"$value\"" >> "$temp_file"
             fi
-          done >> $GITHUB_OUTPUT
+          done
+          
+          # Output the parsed values without exposing them in logs
+          echo "helm_env_values<<EOF" >> $GITHUB_OUTPUT
+          cat "$temp_file" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          rm "$temp_file"
         else
           echo "helm_env_values=" >> $GITHUB_OUTPUT
         fi
         
+    - name: Add secret masks
+      shell: bash
+      run: |
+        echo "::add-mask::${{ inputs.helm_values_env }}"
+        echo "::add-mask::${{ inputs.kube_config_data }}"
+        echo "::add-mask::${{ inputs.helm_values_persistence_nodename }}"
+        echo "::add-mask::${{ steps.parse_env.outputs.helm_env_values }}"
+        
     - name: Deploy with Helm
       shell: bash
       run: |
-        # Create temporary values file
-        cat > /tmp/override-values.yaml << EOF
+        # Create temporary values file with restricted permissions
+        temp_values=$(mktemp)
+        chmod 600 "$temp_values"
+        
+        cat > "$temp_values" << EOF
         image:
           repository: ${{ inputs.registry_repository }}
           tag: "${{ inputs.image_tag }}"
@@ -77,13 +94,16 @@ runs:
         ${{ steps.parse_env.outputs.helm_env_values }}
         EOF
         
-        # Deploy using Helm
+        # Deploy using Helm (values file won't be logged due to file redirection)
         helm upgrade --install slm-server ./deploy/helm \
           --namespace ${{ inputs.namespace }} \
           --create-namespace \
-          --values /tmp/override-values.yaml \
+          --values "$temp_values" \
           --wait \
           --timeout 10m
+        
+        # Clean up temporary file
+        rm "$temp_values"
 
     - name: Verify deployment
       shell: bash
