@@ -81,7 +81,7 @@ env: {}
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 resources:
   limits:
-    cpu: 1750m
+    cpu: 1500m
     memory: 800Mi
   # requests:
   #   cpu: 1
@@ -93,7 +93,7 @@ probes:
     enabled: true
     path: /health
     initialDelaySeconds: 10
-    periodSeconds: 10
+    periodSeconds: 70
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
@@ -101,7 +101,7 @@ probes:
     enabled: true
     path: /health
     initialDelaySeconds: 30
-    periodSeconds: 30
+    periodSeconds: 70
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3

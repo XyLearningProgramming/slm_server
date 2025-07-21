@@ -52,7 +52,7 @@ docker run -p 8000:8000 -v $(pwd)/models:/app/models slm_server
 ### Test the API
 
 ```bash
-curl -X POST http://localhost:8000/chat/completions \
+curl -X POST http://localhost:8000/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen",
