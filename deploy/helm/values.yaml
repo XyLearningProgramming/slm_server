@@ -50,6 +50,14 @@ ingress:
 hpa:
   enabled: false
 
+# This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
 # Environment variables to inject into the container
 # Example configuration for SLM server settings
 env: {}
@@ -73,7 +81,7 @@ env: {}
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 resources:
   limits:
-    cpu: 2.5
+    cpu: 1500m
     memory: 800Mi
   # requests:
   #   cpu: 1
@@ -85,7 +93,7 @@ probes:
     enabled: true
     path: /health
     initialDelaySeconds: 10
-    periodSeconds: 10
+    periodSeconds: 70
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
@@ -93,7 +101,7 @@ probes:
     enabled: true
     path: /health
     initialDelaySeconds: 30
-    periodSeconds: 30
+    periodSeconds: 70
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
