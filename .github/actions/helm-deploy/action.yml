@@ -32,6 +32,8 @@ runs:
       uses: azure/setup-helm@v3
       with:
         version: 'latest'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         
     - name: Set up Kubernetes config
       shell: bash
@@ -53,6 +55,7 @@ runs:
               continue
             fi
             if [ -n "$key" ] && [ -n "$value" ]; then
+              echo "::add-mask::$value"
               echo "  $key: \"$value\"" >> "$temp_file"
             fi
           done
@@ -65,15 +68,7 @@ runs:
         else
           echo "helm_env_values=" >> $GITHUB_OUTPUT
         fi
-        
-    - name: Add secret masks
-      shell: bash
-      run: |
-        echo "::add-mask::${{ inputs.helm_values_env }}"
-        echo "::add-mask::${{ inputs.kube_config_data }}"
-        echo "::add-mask::${{ inputs.helm_values_persistence_nodename }}"
-        echo "::add-mask::${{ steps.parse_env.outputs.helm_env_values }}"
-        
+         
     - name: Deploy with Helm
       shell: bash
       run: |
