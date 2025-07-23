@@ -26,6 +26,7 @@ select = ["C", "E", "F", "W"]
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "langchain>=0.3.26",
     "pytest>=8.4.1",
     "pytest-cov>=4.0.0",
     "ruff>=0.12.3",

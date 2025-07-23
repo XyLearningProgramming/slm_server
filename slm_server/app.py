@@ -1,5 +1,6 @@
 import asyncio
 import traceback
+from http import HTTPStatus
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -13,6 +14,8 @@ from slm_server.model import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionStreamResponse,
+    EmbeddingRequest,
+    EmbeddingResponse,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
@@ -28,6 +31,11 @@ from slm_server.utils import (
 MAX_CONCURRENCY = 1
 # Default timeout message in detail field.
 DETAIL_SEM_TIMEOUT = "Server is busy, please try again later."
+# Status code for semaphore timeout.
+STATUS_CODE_SEM_TIMEOUT = HTTPStatus.REQUEST_TIMEOUT
+# Status code for unexpected errors.
+# This is used when the server encounters an error that is not handled
+STATUS_CODE_EXCEPTION = HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 def get_llm_semaphor() -> asyncio.Semaphore:
@@ -88,7 +96,9 @@ async def lock_llm_semaphor(
         )
         yield None
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail=DETAIL_SEM_TIMEOUT)
+        raise HTTPException(
+            status_code=STATUS_CODE_SEM_TIMEOUT, detail=DETAIL_SEM_TIMEOUT
+        )
     finally:
         if sem.locked():
             sem.release()
@@ -156,7 +166,31 @@ async def create_chat_completion(
     except Exception:
         # Catch any other unexpected errors
         error_str = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=error_str)
+        raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)
+
+
+@app.post("/api/v1/embeddings")
+async def create_embeddings(
+    req: EmbeddingRequest,
+    llm: Annotated[Llama, Depends(get_llm)],
+    _: Annotated[None, Depends(lock_llm_semaphor)],
+):
+    """Create embeddings for the given input text(s)."""
+    try:
+        # Use llama-cpp-python's create_embedding method directly
+        embedding_result = await asyncio.to_thread(
+            llm.create_embedding,
+            input=req.input,
+            model=req.model,
+        )
+
+        # Convert llama-cpp response using model_validate like chat completion
+        response_model = EmbeddingResponse.model_validate(embedding_result)
+        return response_model
+
+    except Exception:
+        error_str = traceback.format_exc()
+        raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)
 
 
 @app.get("/health")

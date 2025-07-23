@@ -1,64 +1,46 @@
+import argparse
 import asyncio
-import json
 
-import httpx
-
-
-async def test_chat_completion_non_streaming():
-    print("Testing non-streaming chat completion...")
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://localhost:8000/api/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "Hello /no think"}],
-                "stream": False,
-            },
-            timeout=30,
-        )
-        assert response.status_code == 200
-        response_data = response.json()
-        print(f"Non-streaming response: {response_data}")
-        assert "choices" in response_data
-        assert len(response_data["choices"]) > 0
-        assert "message" in response_data["choices"][0]
-        assert "content" in response_data["choices"][0]["message"]
-
-
-async def test_chat_completion_streaming():
-    print("\nTesting streaming chat completion...")
-    async with httpx.AsyncClient() as client:
-        async with client.stream(
-            "POST",
-            "http://localhost:8000/api/v1/chat/completions",
-            json={
-                "messages": [{"role": "user", "content": "Hello /no think"}],
-                "stream": True,
-            },
-            timeout=30,
-        ) as response:
-            assert response.status_code == 200
-            print("Streaming response:")
-            async for chunk in response.aiter_bytes():
-                if chunk.strip():
-                    # Decode bytes to string and remove the 'data: ' prefix
-                    data_str = chunk.decode("utf-8").replace("data: ", "").strip()
-                    if data_str == "[DONE]":
-                        print("\nStream finished.")
-                        break
-                    try:
-                        # Parse the JSON data
-                        response_data = json.loads(data_str)
-                        print(response_data, end="", flush=True)
-                        assert "choices" in response_data
-                        assert len(response_data["choices"]) > 0
-                        assert "delta" in response_data["choices"][0]
-                    except json.JSONDecodeError:
-                        print(f"\nError decoding JSON: {data_str}")
+from test_api import run_api_tests
+from test_langchain_compatibility import run_langchain_tests
 
 
 async def main():
-    await test_chat_completion_non_streaming()
-    await test_chat_completion_streaming()
+    """Main entry point with argument parsing for test groups."""
+    parser = argparse.ArgumentParser(description="Run e2e tests")
+    parser.add_argument(
+        "--skip", 
+        action="append",
+        choices=["api", "langchain"],
+        help="Skip specific test groups (can be used multiple times)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Determine which tests to run
+    skip_groups = args.skip or []
+    run_api = "api" not in skip_groups
+    run_langchain = "langchain" not in skip_groups
+    
+    success = True
+    
+    if run_api:
+        print("Starting API tests...")
+        api_success = await run_api_tests()
+        success = success and api_success
+        print()
+    
+    if run_langchain:
+        print("Starting LangChain compatibility tests...")
+        langchain_success = run_langchain_tests()
+        success = success and langchain_success
+        print()
+
+    
+    if success:
+        print("🎉 All selected tests completed successfully!")
+    else:
+        raise Exception("❌ Some tests failed!")
 
 
 if __name__ == "__main__":

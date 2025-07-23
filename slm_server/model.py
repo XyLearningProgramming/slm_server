@@ -1,12 +1,16 @@
 import time
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field
 
 
 def generate_chat_id():
     return f"chatcmpl-{uuid.uuid4().hex}"
+
+
+def generate_embedding_id():
+    return f"embedding-{uuid.uuid4().hex}"
 
 
 def generate_timestamp():
@@ -69,3 +73,44 @@ class ChatCompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=generate_timestamp)
     model: str
     choices: List[ChatCompletionStreamChoice]
+
+
+# Embeddings API Models
+class EmbeddingRequest(BaseModel):
+    model_config = {"extra": "ignore"}
+    input: Union[str, List[str]]
+    model: Optional[str] = Field(
+        "text-embedding-ada-002", description="Model name, not important for our server"
+    )
+    # encoding_format: Optional[str] = Field(
+    #     "float",
+    #     description="NOT IN USE FOR NOW. The format to return the embeddings in",
+    # )
+    # dimensions: Optional[int] = Field(
+    #     None,
+    #     description="NOT IN USE FOR NOW. Number of dimensions the \
+    #         resulting output embeddings should have",
+    # )
+    # user: Optional[str] = Field(
+    #     None,
+    #     description="NOT IN USE FOR NOW. A unique identifier representing \
+    #         your end-user",
+    # )
+
+
+class EmbeddingData(BaseModel):
+    object: str = "embedding"
+    embedding: List[float]
+    index: int
+
+
+class EmbeddingUsage(BaseModel):
+    prompt_tokens: int
+    total_tokens: int
+
+
+class EmbeddingResponse(BaseModel):
+    object: str = "list"
+    data: List[EmbeddingData]
+    model: str
+    usage: EmbeddingUsage
