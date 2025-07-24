@@ -38,13 +38,13 @@ from slm_server.utils import (
     METRIC_TOTAL_TOKENS_PER_SECOND,
     SLMLoggingSpanProcessor,
     SLMMetricsSpanProcessor,
-    _calculate_chunk_metrics_from_events,
     calculate_performance_metrics,
     set_atrribute_response,
     set_atrribute_response_stream,
     slm_span,
-    tracer,
 )
+from slm_server.utils.metrics import _calculate_chunk_metrics_from_events
+from slm_server.utils.spans import tracer
 
 
 @pytest.fixture
@@ -342,7 +342,7 @@ class TestSlmSpan:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
             with slm_span(request, is_streaming=True) as (span, messages):
                 pass
         
@@ -370,7 +370,7 @@ class TestSlmSpan:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
             with slm_span(request, is_streaming=True) as (span, messages):
                 pass
         
@@ -388,7 +388,7 @@ class TestSlmSpan:
         
         with pytest.raises(ValueError):
             # Patch the global tracer with our local one
-            with patch('slm_server.utils.tracer', local_tracer):
+            with patch('slm_server.utils.spans.tracer', local_tracer):
                 with slm_span(request, is_streaming=False) as (span, messages):
                     raise ValueError("test error")
         
@@ -607,7 +607,6 @@ class TestSLMMetricsSpanProcessor:
             mock_labels.assert_called_with(
                 model="test-model", 
                 streaming="non_streaming", 
-                error_type="str"  # type of string description
             )
             mock_counter.inc.assert_called_once()
 
@@ -627,7 +626,7 @@ class TestIntegrationStreamingCall:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
             with slm_span(request, is_streaming=True) as (span, messages_for_llm):
                 # Simulate processing chunks
                 chunks = [
@@ -699,7 +698,7 @@ class TestIntegrationNonStreamingCall:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
             with slm_span(request, is_streaming=False) as (span, messages_for_llm):
                 # Simulate processing response
                 response = ChatCompletionResponse(

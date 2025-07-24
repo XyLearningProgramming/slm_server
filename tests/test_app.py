@@ -35,6 +35,7 @@ def reset_mock():
     """Reset the mock before each test."""
     mock_llama.reset_mock()
     mock_llama.create_chat_completion.side_effect = None  # Clear any side effects
+    mock_llama.create_embedding.side_effect = None  # Clear any side effects for embedding
     
     # Patch the tracer in utils.py to use our test tracer
     local_tracer = tracer_provider.get_tracer(__name__)
@@ -129,7 +130,7 @@ def test_server_busy_exception():
             "/api/v1/chat/completions",
             json={"messages": [{"role": "user", "content": "Hello"}], "stream": False},
         )
-        assert response.status_code == 503
+        assert response.status_code == 408
         assert response.json()["detail"] == DETAIL_SEM_TIMEOUT
 
 
@@ -393,6 +394,220 @@ def test_streaming_call_with_empty_chunks():
     
     # Should handle empty chunks gracefully without errors
     mock_llama.create_chat_completion.assert_called_once()
+
+
+def test_embeddings_endpoint_string_input():
+    """Tests the embeddings endpoint with string input."""
+    mock_llama.create_embedding.return_value = {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": [0.1, -0.2, 0.3, -0.4, 0.5],
+                "index": 0
+            }
+        ],
+        "model": "test-model",
+        "usage": {
+            "prompt_tokens": 5,
+            "total_tokens": 5
+        }
+    }
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": "Hello world", "model": "test-model"}
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    
+    assert response_data["object"] == "list"
+    assert len(response_data["data"]) == 1
+    assert response_data["data"][0]["object"] == "embedding"
+    assert response_data["data"][0]["embedding"] == [0.1, -0.2, 0.3, -0.4, 0.5]
+    assert response_data["data"][0]["index"] == 0
+    assert response_data["model"] == "test-model"
+    assert response_data["usage"]["prompt_tokens"] == 5
+    assert response_data["usage"]["total_tokens"] == 5
+    
+    # Verify the LLM was called correctly
+    mock_llama.create_embedding.assert_called_once_with(
+        input="Hello world",
+        model="test-model"
+    )
+
+
+def test_embeddings_endpoint_list_input():
+    """Tests the embeddings endpoint with list input."""
+    mock_llama.create_embedding.return_value = {
+        "object": "list", 
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": [0.1, 0.2, 0.3],
+                "index": 0
+            },
+            {
+                "object": "embedding",
+                "embedding": [0.4, 0.5, 0.6],
+                "index": 1
+            }
+        ],
+        "model": "test-model",
+        "usage": {
+            "prompt_tokens": 10,
+            "total_tokens": 10
+        }
+    }
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": ["First text", "Second text"], "model": "test-model"}
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    
+    assert response_data["object"] == "list"
+    assert len(response_data["data"]) == 2
+    assert response_data["data"][0]["embedding"] == [0.1, 0.2, 0.3]
+    assert response_data["data"][1]["embedding"] == [0.4, 0.5, 0.6]
+    assert response_data["usage"]["prompt_tokens"] == 10
+    
+    # Verify the LLM was called correctly
+    mock_llama.create_embedding.assert_called_once_with(
+        input=["First text", "Second text"],
+        model="test-model"
+    )
+
+
+def test_embeddings_endpoint_default_model():
+    """Tests the embeddings endpoint with default model."""
+    mock_llama.create_embedding.return_value = {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": [0.1, 0.2],
+                "index": 0
+            }
+        ],
+        "model": "Qwen3-0.6B-GGUF",
+        "usage": {
+            "prompt_tokens": 3,
+            "total_tokens": 3
+        }
+    }
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": "Test"}
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    
+    assert response_data["model"] == "Qwen3-0.6B-GGUF"
+    
+    # Verify default model was used
+    mock_llama.create_embedding.assert_called_once_with(
+        input="Test",
+        model="Qwen3-0.6B-GGUF"  # Default model
+    )
+
+
+def test_embeddings_endpoint_error():
+    """Tests the embeddings endpoint error handling."""
+    mock_llama.create_embedding.side_effect = Exception("Embedding failed")
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": "Test", "model": "test-model"}
+    )
+
+    assert response.status_code == 500
+    assert "Embedding failed" in response.json()["detail"]
+
+
+def test_embeddings_endpoint_empty_input():
+    """Tests the embeddings endpoint with empty input."""
+    mock_llama.create_embedding.return_value = {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding", 
+                "embedding": [0.0, 0.0],
+                "index": 0
+            }
+        ],
+        "model": "test-model",
+        "usage": {
+            "prompt_tokens": 0,
+            "total_tokens": 0
+        }
+    }
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": "", "model": "test-model"}
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    
+    assert len(response_data["data"]) == 1
+    assert response_data["usage"]["prompt_tokens"] == 0
+    
+    # Verify empty string was passed through
+    mock_llama.create_embedding.assert_called_once_with(
+        input="",
+        model="test-model"
+    )
+
+
+def test_embeddings_endpoint_with_tracing_integration():
+    """Integration test for embeddings endpoint with complete tracing flow."""
+    mock_llama.create_embedding.return_value = {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": [0.1, -0.2, 0.3, -0.4, 0.5, 0.6, -0.7, 0.8],
+                "index": 0
+            }
+        ],
+        "model": "test-model",
+        "usage": {
+            "prompt_tokens": 8,
+            "total_tokens": 8
+        }
+    }
+
+    response = client.post(
+        "/api/v1/embeddings",
+        json={
+            "input": "This is a test sentence for creating embeddings.",
+            "model": "test-model"
+        }
+    )
+
+    assert response.status_code == 200
+    response_data = response.json()
+    
+    # Verify response structure
+    assert response_data["object"] == "list"
+    assert len(response_data["data"]) == 1
+    assert len(response_data["data"][0]["embedding"]) == 8
+    assert response_data["usage"]["prompt_tokens"] == 8
+    assert response_data["usage"]["total_tokens"] == 8
+    
+    # Verify the LLM was called with correct parameters
+    mock_llama.create_embedding.assert_called_once()
+    call_args = mock_llama.create_embedding.call_args
+    
+    assert call_args[1]["input"] == "This is a test sentence for creating embeddings."
+    assert call_args[1]["model"] == "test-model"
 
 
 def test_request_validation_and_defaults():

@@ -1,14 +1,14 @@
-import asyncio
-import json
 
+import json
+import pytest
 import httpx
 
-
-async def test_chat_completion_non_streaming():
+@pytest.mark.api
+@pytest.mark.api_non_streaming
+def test_chat_completion_non_streaming(server):
     """Test non-streaming chat completion API."""
-    print("Testing non-streaming chat completion...")
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
+    with httpx.Client() as client:
+        response = client.post(
             "http://localhost:8000/api/v1/chat/completions",
             json={
                 "messages": [{"role": "user", "content": "Hello /no think"}],
@@ -16,20 +16,18 @@ async def test_chat_completion_non_streaming():
             },
             timeout=30,
         )
-        assert response.status_code == 200
+        response.raise_for_status()
         response_data = response.json()
-        print(f"Non-streaming response: {response_data}")
         assert "choices" in response_data
         assert len(response_data["choices"]) > 0
         assert "message" in response_data["choices"][0]
         assert "content" in response_data["choices"][0]["message"]
 
-
-async def test_chat_completion_streaming():
+@pytest.mark.api
+def test_chat_completion_streaming(server):
     """Test streaming chat completion API."""
-    print("\nTesting streaming chat completion...")
-    async with httpx.AsyncClient() as client:
-        async with client.stream(
+    with httpx.Client() as client:
+        with client.stream(
             "POST",
             "http://localhost:8000/api/v1/chat/completions",
             json={
@@ -38,88 +36,48 @@ async def test_chat_completion_streaming():
             },
             timeout=30,
         ) as response:
-            assert response.status_code == 200
-            print("Streaming response:")
-            async for chunk in response.aiter_bytes():
+            response.raise_for_status()
+            for chunk in response.iter_bytes():
                 if chunk.strip():
-                    # Decode bytes to string and remove the 'data: ' prefix
                     data_str = chunk.decode("utf-8").replace("data: ", "").strip()
                     if data_str == "[DONE]":
-                        print("\nStream finished.")
                         break
                     try:
-                        # Parse the JSON data
                         response_data = json.loads(data_str)
-                        print(response_data, end="", flush=True)
                         assert "choices" in response_data
                         assert len(response_data["choices"]) > 0
                         assert "delta" in response_data["choices"][0]
                     except json.JSONDecodeError:
-                        print(f"\nError decoding JSON: {data_str}")
+                        pytest.fail(f"Error decoding JSON: {data_str}")
 
-
-async def test_embeddings():
+@pytest.mark.api
+@pytest.mark.api_non_streaming
+def test_embeddings(server):
     """Test embeddings API."""
-    print("Testing embeddings API...")
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
+    with httpx.Client() as client:
+        response = client.post(
             "http://localhost:8000/api/v1/embeddings",
             json={
-                "input": "Hello world",
-                "model": "text-embedding-ada-002"
+                "input": "Hello world"
             },
             timeout=30,
         )
-        assert response.status_code == 200
+        response.raise_for_status()
         response_data = response.json()
-        print(f"Embeddings response: {response_data}")
-        
-        # Validate response structure
-        assert "object" in response_data
         assert response_data["object"] == "list"
-        assert "data" in response_data
         assert len(response_data["data"]) == 1
         assert "embedding" in response_data["data"][0]
-        assert "index" in response_data["data"][0]
-        assert len(response_data["data"][0]["embedding"]) == 1536
-        assert "usage" in response_data
-        
+        assert len(response_data["data"][0]["embedding"]) > 0
+
         # Test with multiple inputs
-        response = await client.post(
+        response = client.post(
             "http://localhost:8000/api/v1/embeddings",
             json={
                 "input": ["Hello", "World"],
-                "model": "text-embedding-ada-002"
+                "model": "Qwen3-0.6B-GGUF"
             },
             timeout=30,
         )
-        assert response.status_code == 200
+        response.raise_for_status()
         response_data = response.json()
         assert len(response_data["data"]) == 2
-        print("Multiple inputs test passed!")
-
-
-async def run_api_tests():
-    """Run all API tests."""
-    print("=== API Tests ===\n")
-    try:
-        await test_chat_completion_non_streaming()
-        print("\n" + "="*50 + "\n")
-        
-        await test_chat_completion_streaming()
-        print("\n" + "="*50 + "\n")
-        
-        await test_embeddings()
-        print("\n" + "="*50 + "\n")
-        
-        print("✅ All API tests completed successfully!")
-        return True
-    except Exception as e:
-        print(f"❌ API test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-
-if __name__ == "__main__":
-    asyncio.run(run_api_tests())

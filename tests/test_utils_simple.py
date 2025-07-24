@@ -30,11 +30,11 @@ from slm_server.utils import (
     METRIC_TOKENS_PER_SECOND,
     METRIC_TOTAL_DURATION,
     METRIC_TOTAL_TOKENS_PER_SECOND,
-    _calculate_chunk_metrics_from_events,
     calculate_performance_metrics,
     set_atrribute_response,
     set_atrribute_response_stream,
 )
+from slm_server.utils.metrics import _calculate_chunk_metrics_from_events
 
 
 class TestSetAttributeResponse:
