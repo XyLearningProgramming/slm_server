@@ -4,16 +4,17 @@ from unittest.mock import Mock
 
 import pytest
 
-from slm_server.model import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
-    ChatMessage,
-    Usage,
-    ChatCompletionChoice,
-    ChatCompletionStreamChoice,
-    DeltaMessage,
+from llama_cpp.llama_types import (
+    ChatCompletionRequestMessage,
+    ChatCompletionResponseMessage as ChatMessage,
+    CreateChatCompletionResponse as ChatCompletionResponse,
+    CreateChatCompletionStreamResponse as ChatCompletionStreamResponse,
+    CompletionUsage as Usage,
+    ChatCompletionResponseChoice as ChatCompletionChoice,
+    ChatCompletionStreamResponseChoice as ChatCompletionStreamChoice,
+    ChatCompletionStreamResponseDelta as DeltaMessage,
 )
+from slm_server.model import ChatCompletionRequest
 from slm_server.utils import (
     ATTR_CHUNK_COUNT,
     EVENT_ATTR_CHUNK_CONTENT_SIZE,

@@ -8,12 +8,12 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from slm_server.model import (
-    EmbeddingRequest,
-    EmbeddingResponse,
+from llama_cpp.llama_types import (
+    CreateEmbeddingResponse as EmbeddingResponse,
     EmbeddingData,
     EmbeddingUsage,
 )
+from slm_server.model import EmbeddingRequest
 from slm_server.utils import (
     ATTR_INPUT_COUNT,
     ATTR_INPUT_CONTENT_LENGTH,
@@ -305,7 +305,7 @@ class TestEmbeddingModelValidation:
         """Test EmbeddingRequest with default model."""
         request = EmbeddingRequest(input="Test")
         
-        assert request.model == "Qwen3-0.6B-GGUF"  # Default from model definition
+        assert request.model is None  # Default is None as model is not important for server
     
     def test_embedding_response_creation(self):
         """Test EmbeddingResponse creation."""
@@ -322,24 +322,25 @@ class TestEmbeddingModelValidation:
             usage=EmbeddingUsage(prompt_tokens=10, total_tokens=10)
         )
         
-        assert response.object == "list"
-        assert len(response.data) == 1
-        assert response.data[0].embedding == [1.0, 2.0, 3.0]
-        assert response.data[0].index == 0
-        assert response.model == "test-model"
-        assert response.usage.prompt_tokens == 10
-        assert response.usage.total_tokens == 10
+        assert response["object"] == "list"
+        assert len(response["data"]) == 1
+        assert response["data"][0]["embedding"] == [1.0, 2.0, 3.0]
+        assert response["data"][0]["index"] == 0
+        assert response["model"] == "test-model"
+        assert response["usage"]["prompt_tokens"] == 10
+        assert response["usage"]["total_tokens"] == 10
     
     def test_embedding_data_defaults(self):
-        """Test EmbeddingData with default values."""
+        """Test EmbeddingData with explicit object field."""
         data = EmbeddingData(
+            object="embedding",
             embedding=[0.1, 0.2, 0.3],
             index=0
         )
         
-        assert data.object == "embedding"  # Default value
-        assert data.embedding == [0.1, 0.2, 0.3]
-        assert data.index == 0
+        assert data["object"] == "embedding"
+        assert data["embedding"] == [0.1, 0.2, 0.3]
+        assert data["index"] == 0
 
 
 class TestIntegrationEmbeddingFlow:

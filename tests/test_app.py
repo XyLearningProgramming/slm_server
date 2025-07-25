@@ -513,7 +513,7 @@ def test_embeddings_endpoint_default_model():
     # Verify default model was used
     mock_llama.create_embedding.assert_called_once_with(
         input="Test",
-        model="Qwen3-0.6B-GGUF"  # Default model
+        model=None  # Default model is None
     )
 
 
@@ -637,8 +637,8 @@ def test_request_validation_and_defaults():
     
     # Verify defaults were applied
     call_args = mock_llama.create_chat_completion.call_args
-    assert call_args[1]["max_tokens"] == 2048  # Default value
-    assert call_args[1]["temperature"] == 0.7  # Default value
+    assert call_args[1]["max_tokens"] is None  # Default value
+    assert call_args[1]["temperature"] == 0.2  # Default value
     assert call_args[1]["stream"] is False     # Default value
 
 

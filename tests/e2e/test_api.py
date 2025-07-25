@@ -60,7 +60,37 @@ def test_embeddings(server):
             json={
                 "input": "Hello world"
             },
-            timeout=30,
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        assert response_data["object"] == "list"
+        assert len(response_data["data"]) == 1
+        assert "embedding" in response_data["data"][0]
+        assert len(response_data["data"][0]["embedding"]) > 0
+
+        # Test with multiple inputs
+        response = client.post(
+            "http://localhost:8000/api/v1/embeddings",
+            json={
+                "input": ["Hello", "World"],
+                "model": "Qwen3-0.6B-GGUF"
+            },
+        )
+        response.raise_for_status()
+        response_data = response.json()
+        assert len(response_data["data"]) == 2
+
+
+@pytest.mark.api
+@pytest.mark.api_non_streaming
+def test_embeddings_multiple(server):
+    """Test embeddings API."""
+    with httpx.Client() as client:
+        response = client.post(
+            "http://localhost:8000/api/v1/embeddings",
+            json={
+                "input": ["Hello, world"]
+            },
         )
         response.raise_for_status()
         response_data = response.json()
@@ -81,3 +111,4 @@ def test_embeddings(server):
         response.raise_for_status()
         response_data = response.json()
         assert len(response_data["data"]) == 2
+

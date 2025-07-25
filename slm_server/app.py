@@ -1,25 +1,22 @@
 import asyncio
+import json
 import traceback
 from http import HTTPStatus
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from llama_cpp import Llama
+from llama_cpp import CreateChatCompletionStreamResponse, Llama
 
 from slm_server.config import Settings, get_settings
 from slm_server.logging import setup_logging
 from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
     EmbeddingRequest,
-    EmbeddingResponse,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
-    process_embedding_input,
     set_atrribute_response,
     set_atrribute_response_stream,
     set_attribute_cancelled,
@@ -61,6 +58,7 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
             embedding=True,
             use_mlock=True,  # Use mlock to prevent memory swapping
             use_mmap=True,  # Use memory-mapped files for faster access
+            chat_format="chatml-function-calling",
         )
     return get_llm._instance
 
@@ -109,22 +107,19 @@ async def run_llm_streaming(
     llm: Llama, req: ChatCompletionRequest
 ) -> AsyncGenerator[str, None]:
     """Generator that runs the LLM and yields SSE chunks under lock."""
-    with slm_span(req, is_streaming=True) as (span, messages_for_llm):
+    with slm_span(req, is_streaming=True) as span:
         try:
             completion_stream = await asyncio.to_thread(
                 llm.create_chat_completion,
-                messages=messages_for_llm,
-                max_tokens=req.max_tokens,
-                temperature=req.temperature,
-                stream=True,
+                **req.model_dump(),
             )
 
             # Use traced iterator that automatically handles chunk spans
             # and parent span updates
+            chunk: CreateChatCompletionStreamResponse
             for chunk in completion_stream:
-                response_model = ChatCompletionStreamResponse.model_validate(chunk)
-                set_atrribute_response_stream(span, response_model)
-                yield f"data: {response_model.model_dump_json()}\n\n"
+                set_atrribute_response_stream(span, chunk)
+                yield f"data: {json.dumps(chunk)}\n\n"
 
             yield "data: [DONE]\n\n"
         except asyncio.CancelledError:
@@ -132,23 +127,16 @@ async def run_llm_streaming(
             set_attribute_cancelled(span)
 
 
-async def run_llm_non_streaming(
-    llm: Llama, req: ChatCompletionRequest
-) -> ChatCompletionResponse:
+async def run_llm_non_streaming(llm: Llama, req: ChatCompletionRequest):
     """Runs the LLM for a non-streaming request under lock."""
-    with slm_span(req, is_streaming=False) as (span, messages_for_llm):
+    with slm_span(req, is_streaming=False) as span:
         completion_result = await asyncio.to_thread(
             llm.create_chat_completion,
-            messages=messages_for_llm,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            stream=False,
+            **req.model_dump(),
         )
+        set_atrribute_response(span, completion_result)
 
-        response_model = ChatCompletionResponse.model_validate(completion_result)
-        set_atrribute_response(span, response_model)
-
-        return response_model
+        return completion_result
 
 
 @app.post("/api/v1/chat/completions")
@@ -183,19 +171,14 @@ async def create_embeddings(
     """Create embeddings for the given input text(s)."""
     try:
         with slm_embedding_span(req) as span:
-            # Process input to handle both text and tokenized input
-            processed_input = process_embedding_input(req.input, llm.detokenize)
-
             # Use llama-cpp-python's create_embedding method directly
             embedding_result = await asyncio.to_thread(
                 llm.create_embedding,
-                input=processed_input,
-                model=req.model,
+                **req.model_dump(),
             )
             # Convert llama-cpp response using model_validate like chat completion
-            response_model = EmbeddingResponse.model_validate(embedding_result)
-            set_attribute_response_embedding(span, response_model)
-            return response_model
+            set_attribute_response_embedding(span, embedding_result)
+            return embedding_result
     except Exception:
         error_str = traceback.format_exc()
         raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)

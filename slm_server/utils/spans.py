@@ -7,11 +7,13 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import Span
 from opentelemetry.trace import Status, StatusCode
 
+from llama_cpp.llama_types import (
+    CreateChatCompletionResponse as ChatCompletionResponse,
+    CreateEmbeddingResponse as EmbeddingResponse,
+)
 from slm_server.model import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
     EmbeddingRequest,
-    EmbeddingResponse,
 )
 
 from .constants import (
@@ -42,30 +44,55 @@ tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
 
 
-def set_atrribute_response(span: Span, response: ChatCompletionResponse):
+def set_atrribute_response(span: Span, response: ChatCompletionResponse | dict):
     """Set response attributes automatically."""
-    # Non-streaming response
-    if response.usage:
-        span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
-        span.set_attribute(ATTR_COMPLETION_TOKENS, response.usage.completion_tokens)
-        span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
+    # Non-streaming response - handle both dict and object responses
+    if isinstance(response, dict):
+        # Handle dict response
+        usage = response.get("usage")
+        if usage:
+            span.set_attribute(ATTR_PROMPT_TOKENS, usage.get("prompt_tokens", 0))
+            span.set_attribute(
+                ATTR_COMPLETION_TOKENS, usage.get("completion_tokens", 0)
+            )
+            span.set_attribute(ATTR_TOTAL_TOKENS, usage.get("total_tokens", 0))
 
-    if response.choices and response.choices[0].message:
-        content = response.choices[0].message.content or ""
-        span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+        choices = response.get("choices", [])
+        if choices and choices[0].get("message"):
+            content = choices[0]["message"].get("content") or ""
+            span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+    else:
+        # Handle object response (original code)
+        if response.usage:
+            span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
+            span.set_attribute(ATTR_COMPLETION_TOKENS, response.usage.completion_tokens)
+            span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
+
+        if response.choices and response.choices[0].message:
+            content = response.choices[0].message.content or ""
+            span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
 
 
-def set_atrribute_response_stream(span: Span, response: ChatCompletionStreamResponse):
+def set_atrribute_response_stream(
+    span: Span, response: ChatCompletionStreamResponse | dict
+):
     """Record streaming chunk as an event and accumulate tokens."""
     chunk_content = ""
-    if (
-        response.choices
-        and response.choices[0].delta
-        and response.choices[0].delta.content
-    ):
-        chunk_content = response.choices[0].delta.content
-
-    chunk_json = response.model_dump_json()
+    if isinstance(response, dict):
+        # Handle dict response
+        choices = response.get("choices", [])
+        if choices and choices[0].get("delta") and choices[0]["delta"].get("content"):
+            chunk_content = choices[0]["delta"]["content"]
+        chunk_json = str(response)  # Simple string representation for dict
+    else:
+        # Handle object response (original code)
+        if (
+            response.choices
+            and response.choices[0].delta
+            and response.choices[0].delta.content
+        ):
+            chunk_content = response.choices[0].delta.content
+        chunk_json = response.model_dump_json()
 
     # Record chunk as an event
     chunk_event = {
@@ -103,13 +130,24 @@ def set_atrribute_response_stream(span: Span, response: ChatCompletionStreamResp
         span.set_attribute(ATTR_CHUNK_COUNT, current_chunk_count + 1)
 
 
-def set_attribute_response_embedding(span: Span, response: EmbeddingResponse):
+def set_attribute_response_embedding(span: Span, response: EmbeddingResponse | dict):
     """Set embedding response attributes automatically."""
-    if response.usage:
-        span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
-        span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
-    if response.data:
-        span.set_attribute(ATTR_OUTPUT_COUNT, len(response.data))
+    if isinstance(response, dict):
+        # Handle dict response
+        usage = response.get("usage")
+        if usage:
+            span.set_attribute(ATTR_PROMPT_TOKENS, usage.get("prompt_tokens", 0))
+            span.set_attribute(ATTR_TOTAL_TOKENS, usage.get("total_tokens", 0))
+        data = response.get("data")
+        if data:
+            span.set_attribute(ATTR_OUTPUT_COUNT, len(data))
+    else:
+        # Handle object response (original code)
+        if response.usage:
+            span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
+            span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
+        if response.data:
+            span.set_attribute(ATTR_OUTPUT_COUNT, len(response.data))
 
 
 def set_attribute_cancelled(span: Span, reason: str = "client disconnected"):
@@ -125,7 +163,7 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
     )
 
     # Pre-calculate attributes before starting span
-    messages_for_llm = [msg.model_dump() for msg in req.messages]
+    messages_for_llm = req.messages
     input_content_length = sum(len(msg.get("content", "")) for msg in messages_for_llm)
 
     # Set initial attributes that will be available in on_start
@@ -149,7 +187,7 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
 
     with tracer.start_as_current_span(span_name, attributes=initial_attributes) as span:
         try:
-            yield span, messages_for_llm
+            yield span
 
         except Exception:
             # Use native error handling
