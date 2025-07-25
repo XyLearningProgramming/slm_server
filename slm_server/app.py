@@ -1,23 +1,27 @@
 import asyncio
+import json
 import traceback
+from http import HTTPStatus
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from llama_cpp import Llama
+from llama_cpp import CreateChatCompletionStreamResponse, Llama
 
 from slm_server.config import Settings, get_settings
 from slm_server.logging import setup_logging
 from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
+    EmbeddingRequest,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
     set_atrribute_response,
     set_atrribute_response_stream,
+    set_attribute_cancelled,
+    set_attribute_response_embedding,
+    slm_embedding_span,
     slm_span,
 )
 
@@ -28,6 +32,11 @@ from slm_server.utils import (
 MAX_CONCURRENCY = 1
 # Default timeout message in detail field.
 DETAIL_SEM_TIMEOUT = "Server is busy, please try again later."
+# Status code for semaphore timeout.
+STATUS_CODE_SEM_TIMEOUT = HTTPStatus.REQUEST_TIMEOUT
+# Status code for unexpected errors.
+# This is used when the server encounters an error that is not handled
+STATUS_CODE_EXCEPTION = HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 def get_llm_semaphor() -> asyncio.Semaphore:
@@ -46,9 +55,10 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
             verbose=settings.logging.verbose,
             seed=settings.seed,
             logits_all=False,
-            embedding=False,
+            embedding=True,
             use_mlock=True,  # Use mlock to prevent memory swapping
             use_mmap=True,  # Use memory-mapped files for faster access
+            chat_format="chatml-function-calling",
         )
     return get_llm._instance
 
@@ -77,18 +87,17 @@ app = get_app()
 
 
 async def lock_llm_semaphor(
-    req: ChatCompletionRequest,
     sem: Annotated[asyncio.Semaphore, Depends(get_llm_semaphor)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AsyncGenerator[None, None]:
     """Context manager to acquire and release the LLM semaphore with a timeout."""
     try:
-        await asyncio.wait_for(
-            sem.acquire(), timeout=req.wait_timeout or settings.s_timeout
-        )
+        await asyncio.wait_for(sem.acquire(), settings.s_timeout)
         yield None
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail=DETAIL_SEM_TIMEOUT)
+        raise HTTPException(
+            status_code=STATUS_CODE_SEM_TIMEOUT, detail=DETAIL_SEM_TIMEOUT
+        )
     finally:
         if sem.locked():
             sem.release()
@@ -98,42 +107,36 @@ async def run_llm_streaming(
     llm: Llama, req: ChatCompletionRequest
 ) -> AsyncGenerator[str, None]:
     """Generator that runs the LLM and yields SSE chunks under lock."""
-    with slm_span(req, is_streaming=True) as (span, messages_for_llm):
-        completion_stream = await asyncio.to_thread(
-            llm.create_chat_completion,
-            messages=messages_for_llm,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            stream=True,
-        )
+    with slm_span(req, is_streaming=True) as span:
+        try:
+            completion_stream = await asyncio.to_thread(
+                llm.create_chat_completion,
+                **req.model_dump(),
+            )
 
-        # Use traced iterator that automatically handles chunk spans
-        # and parent span updates
-        for chunk in completion_stream:
-            response_model = ChatCompletionStreamResponse.model_validate(chunk)
-            set_atrribute_response_stream(span, response_model)
-            yield f"data: {response_model.model_dump_json()}\n\n"
+            # Use traced iterator that automatically handles chunk spans
+            # and parent span updates
+            chunk: CreateChatCompletionStreamResponse
+            for chunk in completion_stream:
+                set_atrribute_response_stream(span, chunk)
+                yield f"data: {json.dumps(chunk)}\n\n"
 
-        yield "data: [DONE]\n\n"
+            yield "data: [DONE]\n\n"
+        except asyncio.CancelledError:
+            # Handle cancellation gracefully during sse.
+            set_attribute_cancelled(span)
 
 
-async def run_llm_non_streaming(
-    llm: Llama, req: ChatCompletionRequest
-) -> ChatCompletionResponse:
+async def run_llm_non_streaming(llm: Llama, req: ChatCompletionRequest):
     """Runs the LLM for a non-streaming request under lock."""
-    with slm_span(req, is_streaming=False) as (span, messages_for_llm):
+    with slm_span(req, is_streaming=False) as span:
         completion_result = await asyncio.to_thread(
             llm.create_chat_completion,
-            messages=messages_for_llm,
-            max_tokens=req.max_tokens,
-            temperature=req.temperature,
-            stream=False,
+            **req.model_dump(),
         )
+        set_atrribute_response(span, completion_result)
 
-        response_model = ChatCompletionResponse.model_validate(completion_result)
-        set_atrribute_response(span, response_model)
-
-        return response_model
+        return completion_result
 
 
 @app.post("/api/v1/chat/completions")
@@ -156,7 +159,29 @@ async def create_chat_completion(
     except Exception:
         # Catch any other unexpected errors
         error_str = traceback.format_exc()
-        raise HTTPException(status_code=500, detail=error_str)
+        raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)
+
+
+@app.post("/api/v1/embeddings")
+async def create_embeddings(
+    req: EmbeddingRequest,
+    llm: Annotated[Llama, Depends(get_llm)],
+    _: Annotated[None, Depends(lock_llm_semaphor)],
+):
+    """Create embeddings for the given input text(s)."""
+    try:
+        with slm_embedding_span(req) as span:
+            # Use llama-cpp-python's create_embedding method directly
+            embedding_result = await asyncio.to_thread(
+                llm.create_embedding,
+                **req.model_dump(),
+            )
+            # Convert llama-cpp response using model_validate like chat completion
+            set_attribute_response_embedding(span, embedding_result)
+            return embedding_result
+    except Exception:
+        error_str = traceback.format_exc()
+        raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)
 
 
 @app.get("/health")

@@ -9,16 +9,17 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import Status, StatusCode, set_tracer_provider
 
-from slm_server.model import (
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatCompletionStreamResponse,
-    ChatMessage,
-    Usage,
-    ChatCompletionChoice,
-    ChatCompletionStreamChoice,
-    DeltaMessage,
+from llama_cpp.llama_types import (
+    ChatCompletionRequestMessage,
+    ChatCompletionResponseMessage as ChatMessage,
+    CreateChatCompletionResponse as ChatCompletionResponse,
+    CreateChatCompletionStreamResponse as ChatCompletionStreamResponse,
+    CompletionUsage as Usage,
+    ChatCompletionResponseChoice as ChatCompletionChoice,
+    ChatCompletionStreamResponseChoice as ChatCompletionStreamChoice,
+    ChatCompletionStreamResponseDelta as DeltaMessage,
 )
+from slm_server.model import ChatCompletionRequest
 from slm_server.utils import (
     # EVENT_ATTR_CHUNK_CONTENT,
     EVENT_ATTR_CHUNK_CONTENT_SIZE,
@@ -38,13 +39,13 @@ from slm_server.utils import (
     METRIC_TOTAL_TOKENS_PER_SECOND,
     SLMLoggingSpanProcessor,
     SLMMetricsSpanProcessor,
-    _calculate_chunk_metrics_from_events,
     calculate_performance_metrics,
     set_atrribute_response,
     set_atrribute_response_stream,
     slm_span,
-    tracer,
 )
+from slm_server.utils.metrics import _calculate_chunk_metrics_from_events
+from slm_server.utils.spans import tracer
 
 
 @pytest.fixture
@@ -342,8 +343,8 @@ class TestSlmSpan:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
-            with slm_span(request, is_streaming=True) as (span, messages):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
+            with slm_span(request, is_streaming=True) as span:
                 pass
         
         # Get the finished span
@@ -370,8 +371,8 @@ class TestSlmSpan:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
-            with slm_span(request, is_streaming=True) as (span, messages):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
+            with slm_span(request, is_streaming=True) as span:
                 pass
         
         spans = memory_exporter.get_finished_spans()
@@ -388,8 +389,8 @@ class TestSlmSpan:
         
         with pytest.raises(ValueError):
             # Patch the global tracer with our local one
-            with patch('slm_server.utils.tracer', local_tracer):
-                with slm_span(request, is_streaming=False) as (span, messages):
+            with patch('slm_server.utils.spans.tracer', local_tracer):
+                with slm_span(request, is_streaming=False) as span:
                     raise ValueError("test error")
         
         spans = memory_exporter.get_finished_spans()
@@ -607,7 +608,6 @@ class TestSLMMetricsSpanProcessor:
             mock_labels.assert_called_with(
                 model="test-model", 
                 streaming="non_streaming", 
-                error_type="str"  # type of string description
             )
             mock_counter.inc.assert_called_once()
 
@@ -627,8 +627,8 @@ class TestIntegrationStreamingCall:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
-            with slm_span(request, is_streaming=True) as (span, messages_for_llm):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
+            with slm_span(request, is_streaming=True) as span:
                 # Simulate processing chunks
                 chunks = [
                     ChatCompletionStreamResponse(
@@ -699,8 +699,8 @@ class TestIntegrationNonStreamingCall:
         )
         
         # Patch the global tracer with our local one
-        with patch('slm_server.utils.tracer', local_tracer):
-            with slm_span(request, is_streaming=False) as (span, messages_for_llm):
+        with patch('slm_server.utils.spans.tracer', local_tracer):
+            with slm_span(request, is_streaming=False) as span:
                 # Simulate processing response
                 response = ChatCompletionResponse(
                     model="test-model",
