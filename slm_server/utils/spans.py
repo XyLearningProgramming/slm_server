@@ -1,16 +1,19 @@
 import logging
 import traceback
+from asyncio import CancelledError
 from contextlib import contextmanager
 
 from llama_cpp import ChatCompletionStreamResponse
+from llama_cpp.llama_types import (
+    CreateChatCompletionResponse as ChatCompletionResponse,
+)
+from llama_cpp.llama_types import (
+    CreateEmbeddingResponse as EmbeddingResponse,
+)
 from opentelemetry import trace
 from opentelemetry.sdk.trace import Span
 from opentelemetry.trace import Status, StatusCode
 
-from llama_cpp.llama_types import (
-    CreateChatCompletionResponse as ChatCompletionResponse,
-    CreateEmbeddingResponse as EmbeddingResponse,
-)
 from slm_server.model import (
     ChatCompletionRequest,
     EmbeddingRequest,
@@ -188,7 +191,10 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
     with tracer.start_as_current_span(span_name, attributes=initial_attributes) as span:
         try:
             yield span
-
+        except CancelledError:
+            # Handle cancellation gracefully
+            set_attribute_cancelled(span)
+            raise
         except Exception:
             # Use native error handling
             error_str = traceback.format_exc()
@@ -218,7 +224,9 @@ def slm_embedding_span(req: EmbeddingRequest):
     with tracer.start_as_current_span(span_name, attributes=initial_attributes) as span:
         try:
             yield span
-
+        except CancelledError:
+            set_attribute_cancelled(span)
+            raise
         except Exception:
             error_str = traceback.format_exc()
             span.set_status(Status(StatusCode.ERROR, error_str))
