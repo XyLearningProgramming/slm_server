@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 # Set default port to 8000 if not provided
 PORT=${PORT:-8000}
 
