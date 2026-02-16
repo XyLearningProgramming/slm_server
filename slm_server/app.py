@@ -196,7 +196,7 @@ async def create_embeddings(
 async def list_models(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ModelListResponse:
-    """List available models (OpenAI-compatible). Returns the single loaded model from config."""
+    """List available models (OpenAI-compatible). Returns the single loaded model."""
     model_id = Path(settings.model_path).stem
     try:
         created = int(Path(settings.model_path).stat().st_mtime)
