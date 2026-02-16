@@ -2,6 +2,7 @@ import asyncio
 import json
 import traceback
 from http import HTTPStatus
+from pathlib import Path
 from typing import Annotated, AsyncGenerator, Generator, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -14,6 +15,8 @@ from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
     EmbeddingRequest,
+    ModelInfo,
+    ModelListResponse,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
@@ -187,6 +190,29 @@ async def create_embeddings(
         # Convert llama-cpp response using model_validate like chat completion
         set_attribute_response_embedding(span, embedding_result)
         return embedding_result
+
+
+@app.get("/api/v1/models", response_model=ModelListResponse)
+async def list_models(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ModelListResponse:
+    """List available models (OpenAI-compatible). Returns the single loaded model."""
+    model_id = Path(settings.model_path).stem
+    try:
+        created = int(Path(settings.model_path).stat().st_mtime)
+    except (OSError, ValueError):
+        created = 0
+    return ModelListResponse(
+        object="list",
+        data=[
+            ModelInfo(
+                id=model_id,
+                object="model",
+                created=created,
+                owned_by=settings.model_owner,
+            )
+        ],
+    )
 
 
 @app.get("/health")

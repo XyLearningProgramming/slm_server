@@ -88,3 +88,20 @@ class EmbeddingRequest(BaseModel):
     model: str | None = Field(
         default=None, description="Model name, not important for our server"
     )
+
+
+# OpenAI-compatible list models API
+class ModelInfo(BaseModel):
+    """Single model entry for GET /api/v1/models."""
+
+    id: str = Field(description="Model identifier for use in API endpoints")
+    object: str = Field(default="model", description="Object type")
+    created: int = Field(description="Unix timestamp when the model was created")
+    owned_by: str = Field(description="Organization that owns the model")
+
+
+class ModelListResponse(BaseModel):
+    """Response for GET /api/v1/models."""
+
+    object: str = Field(default="list", description="Object type")
+    data: list[ModelInfo] = Field(description="List of available models")

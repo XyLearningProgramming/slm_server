@@ -1,4 +1,5 @@
 import base64
+import logging
 
 from fastapi import FastAPI
 from opentelemetry import trace
@@ -11,10 +12,18 @@ from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
 from slm_server.config import TraceSettings
 
+logger = logging.getLogger(__name__)
+
 
 def setup_tracing(app: FastAPI, settings: TraceSettings) -> None:
     """Initialize OpenTelemetry tracing with optional Grafana Tempo export."""
     if not settings.enabled:
+        return
+
+    if not settings.endpoint or not settings.username or not settings.password:
+        logger.warning(
+            "Grafana Tempo endpoint or credentials not configured, skipping tracing"
+        )
         return
 
     # Define your service name in a Resource
