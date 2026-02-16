@@ -62,6 +62,51 @@ All observability components are configurable and enabled by default:
 - **Prometheus Metrics** - Available at `/metrics` (latency, throughput, token rates, memory usage)
 - **OpenTelemetry Tracing** - Distributed tracing with request flow visualization
 
+## Model Choice
+
+Default model: **Qwen3-0.6B-Q4_K_M** (484 MB) from [`second-state/Qwen3-0.6B-GGUF`](https://huggingface.co/second-state/Qwen3-0.6B-GGUF).
+
+Previously the default was Qwen3-0.6B-Q8_0 (805 MB) from the [official Qwen repo](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF). The switch to Q4_K_M was made to better fit deployment on resource-constrained VPS nodes (1 CPU / 1 GB RAM each).
+
+### Why Qwen3-0.6B
+
+0.6B parameters is the largest Qwen3 tier that fits on a 1 GB node. The next step up (Qwen3-1.7B) requires ~1 GB+ for model weights alone at even aggressive quantization, leaving nothing for the OS, kubelet, or KV cache.
+
+### Why Q4_K_M over Q8_0
+
+| | Q8_0 | Q4_K_M |
+|---|---|---|
+| File size | 805 MB | 484 MB |
+| Est. RAM (with `use_mlock`, 4096 ctx) | ~750 MB | ~550 MB |
+| Quality vs F16 | ~99.9% | ~99% |
+| Inference speed (CPU) | Slower (more data through cache) | **~40-50% faster** |
+
+For a 0.6B model the quality bottleneck is parameter count, not quantization precision -- the difference between Q4 and Q8 is negligible in practice. Q4_K_M ("K_M" = mixed precision on important layers) is the community-recommended sweet spot for balanced quality and performance.
+
+The RAM savings (~200 MB) are significant on a 1 GB node: the pod's memory request drops from ~750 Mi to ~600 Mi, leaving headroom for the OS and co-located workloads.
+
+### Resource estimates
+
+Current Helm resource settings (`deploy/helm/values.yaml`):
+
+| Setting | Value | Rationale |
+|---|---|---|
+| Memory request | 600 Mi | Steady-state with model locked in RAM via `use_mlock` |
+| Memory limit | 700 Mi | ~100 Mi headroom over steady-state |
+| CPU request | 200 m | Meaningful reservation for inference on 1-core VPS |
+| CPU limit | 1 | Matches physical core count |
+
+### Switching models
+
+To use a different quantization, update `scripts/download.sh` and set `SLM_MODEL_PATH`:
+
+```bash
+# In .env or as environment variable
+SLM_MODEL_PATH=/app/models/Qwen3-0.6B-Q8_0.gguf
+```
+
+Available quantizations at [`second-state/Qwen3-0.6B-GGUF`](https://huggingface.co/second-state/Qwen3-0.6B-GGUF): Q2_K (347 MB) through F16 (1.51 GB).
+
 ## Configuration
 
 Configure via environment variables (prefix: `SLM_`) or `.env` file. See [`./slm_server/config.py`](./slm_server/config.py) for all options.

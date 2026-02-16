@@ -7,7 +7,8 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import set_tracer_provider
 
-from slm_server.app import DETAIL_SEM_TIMEOUT, app, get_llm
+from slm_server.app import DETAIL_SEM_TIMEOUT, app, get_llm, get_settings
+from slm_server.config import Settings
 
 # Create a mock Llama instance
 mock_llama = MagicMock()
@@ -640,5 +641,46 @@ def test_request_validation_and_defaults():
     assert call_args[1]["max_tokens"] is None  # Default value
     assert call_args[1]["temperature"] == 0.2  # Default value
     assert call_args[1]["stream"] is False     # Default value
+
+
+def test_list_models_structure():
+    """GET /api/v1/models returns OpenAI-compatible list with one model."""
+    response = client.get("/api/v1/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "list"
+    assert isinstance(data["data"], list)
+    assert len(data["data"]) == 1
+    model = data["data"][0]
+    assert model["object"] == "model"
+    assert "id" in model and isinstance(model["id"], str)
+    assert "created" in model and isinstance(model["created"], int)
+    assert model["owned_by"] == "second-state"
+
+
+def test_list_models_with_overridden_settings():
+    """GET /api/v1/models uses model_path and model_owner from settings."""
+    settings = Settings(
+        model_path="/tmp/SomeModel.gguf",
+        model_owner="custom-org",
+    )
+
+    def override_settings():
+        return settings
+
+    app.dependency_overrides[get_settings] = override_settings
+    try:
+        response = client.get("/api/v1/models")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "list"
+        assert len(data["data"]) == 1
+        model = data["data"][0]
+        assert model["id"] == "SomeModel"
+        assert model["object"] == "model"
+        assert model["owned_by"] == "custom-org"
+        assert model["created"] == 0  # file does not exist
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
 
 

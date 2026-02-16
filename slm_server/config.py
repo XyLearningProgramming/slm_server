@@ -13,7 +13,8 @@ MODELS_DIR = PROJECT_ROOT / "models"
 DOTENV_PATH = PROJECT_ROOT / ".env"
 
 
-MODEL_PATH_DEFAULT = str(MODELS_DIR / "Qwen3-0.6B-Q8_0.gguf")
+MODEL_PATH_DEFAULT = str(MODELS_DIR / "Qwen3-0.6B-Q4_K_M.gguf")
+MODEL_OWNER_DEFAULT = "second-state"
 
 
 class LoggingSettings(BaseModel):
@@ -56,6 +57,10 @@ class Settings(BaseSettings):
     )
 
     model_path: str = Field(MODEL_PATH_DEFAULT, description="Model path for llama_cpp.")
+    model_owner: str = Field(
+        MODEL_OWNER_DEFAULT,
+        description="Owner label for /models list (e.g. Hugging Face org). Set SLM_MODEL_OWNER to override.",
+    )
     n_ctx: int = Field(
         4096, description="Maximum context window (input + generated tokens)."
     )

@@ -2,6 +2,7 @@ import asyncio
 import json
 import traceback
 from http import HTTPStatus
+from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -14,6 +15,8 @@ from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
     EmbeddingRequest,
+    ModelInfo,
+    ModelListResponse,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
@@ -182,6 +185,29 @@ async def create_embeddings(
     except Exception:
         error_str = traceback.format_exc()
         raise HTTPException(status_code=STATUS_CODE_EXCEPTION, detail=error_str)
+
+
+@app.get("/api/v1/models", response_model=ModelListResponse)
+async def list_models(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> ModelListResponse:
+    """List available models (OpenAI-compatible). Returns the single loaded model from config."""
+    model_id = Path(settings.model_path).stem
+    try:
+        created = int(Path(settings.model_path).stat().st_mtime)
+    except (OSError, ValueError):
+        created = 0
+    return ModelListResponse(
+        object="list",
+        data=[
+            ModelInfo(
+                id=model_id,
+                object="model",
+                created=created,
+                owned_by=settings.model_owner,
+            )
+        ],
+    )
 
 
 @app.get("/health")

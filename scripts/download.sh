@@ -5,7 +5,11 @@ set -ex
 # Get the absolute path of the directory where the script is located
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 
-REPO_URL="https://huggingface.co/Qwen/Qwen3-0.6B-GGUF"
+# Original (official Qwen repo, Q8_0 only):
+#   https://huggingface.co/Qwen/Qwen3-0.6B-GGUF  ->  Qwen3-0.6B-Q8_0.gguf
+# Switched to second-state community repo for Q4_K_M quantization.
+# See README.md "Model Choice" section for rationale.
+REPO_URL="https://huggingface.co/second-state/Qwen3-0.6B-GGUF"
 # Set model directory relative to the script's location
 MODEL_DIR="$SCRIPT_DIR/../models"
 
@@ -14,8 +18,8 @@ mkdir -p "$MODEL_DIR"
 
 # --- Files to download ---
 FILES_TO_DOWNLOAD=(
-    "Qwen3-0.6B-Q8_0.gguf"
-    # "params"
+    "Qwen3-0.6B-Q4_K_M.gguf"
+    # Previous default: "Qwen3-0.6B-Q8_0.gguf" (805 MB, from Qwen/Qwen3-0.6B-GGUF)
 )
 
 echo "Downloading Qwen3-0.6B-GGUF model and params files..."
