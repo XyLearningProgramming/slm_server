@@ -2,6 +2,7 @@ import asyncio
 import json
 import traceback
 from http import HTTPStatus
+from pathlib import Path
 from typing import Annotated, AsyncGenerator, Generator, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
