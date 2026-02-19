@@ -62,7 +62,7 @@ class Settings(BaseSettings):
         description="Owner label for /models list. Set SLM_MODEL_OWNER to override.",
     )
     n_ctx: int = Field(
-        4096, description="Maximum context window (input + generated tokens)."
+        8192, description="Maximum context window (input + generated tokens)."
     )
     n_threads: int = Field(
         2, description="Number of OpenMP threads llama‑cpp will spawn."

@@ -79,12 +79,11 @@ env: {}
 
 # Resource requests and limits for the container.
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
-# Tuned for Qwen3-0.6B-Q4_K_M (484 MB) on 1-CPU / 1 GB VPS nodes.
-# Previous values for Q8_0 (805 MB): limits cpu=3/mem=800Mi, requests cpu=50m/mem=32Mi
+# Tuned for Qwen3-0.6B-Q4_K_M (484 MB) + n_ctx=8192 KV cache (~448 MB) on 1-CPU / 1 GB VPS nodes.
 resources:
   limits:
     cpu: 1
-    memory: 700Mi
+    memory: 1Gi
   requests:
     cpu: 200m
     memory: 600Mi
