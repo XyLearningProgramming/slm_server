@@ -18,6 +18,7 @@ KEY_INPUT_IDS: str = "input_ids"
 KEY_ATTENTION_MASK: str = "attention_mask"
 KEY_TOKEN_TYPE_IDS: str = "token_type_ids"
 
+
 class OnnxEmbeddingModel:
     """Lightweight ONNX-based sentence embedding model.
 
@@ -35,9 +36,7 @@ class OnnxEmbeddingModel:
         self.tokenizer.enable_truncation(max_length=settings.max_length)
         self.tokenizer.enable_padding(length=None)
 
-        self.session = InferenceSession(
-            settings.onnx_path, providers=ONNX_PROVIDERS
-        )
+        self.session = InferenceSession(settings.onnx_path, providers=ONNX_PROVIDERS)
 
         elapsed_ms = (time.monotonic() - start) * 1000
         logger.info(
@@ -52,9 +51,7 @@ class OnnxEmbeddingModel:
         encodings = self.tokenizer.encode_batch(texts)
 
         input_ids = np.array([e.ids for e in encodings], dtype=np.int64)
-        attention_mask = np.array(
-            [e.attention_mask for e in encodings], dtype=np.int64
-        )
+        attention_mask = np.array([e.attention_mask for e in encodings], dtype=np.int64)
         token_type_ids = np.zeros_like(input_ids)
 
         outputs = self.session.run(

@@ -194,9 +194,7 @@ async def create_embeddings(
     """Create embeddings using the dedicated ONNX embedding model."""
     with slm_embedding_span(req) as span:
         inputs = req.input if isinstance(req.input, list) else [req.input]
-        vectors = await asyncio.to_thread(
-            emb_model.encode, inputs, True
-        )
+        vectors = await asyncio.to_thread(emb_model.encode, inputs, True)
         result = EmbeddingResponse(
             data=[
                 EmbeddingData(embedding=vec.tolist(), index=i)
