@@ -194,7 +194,9 @@ class ChatCompletionResponse(BaseModel):
                                         "type": "function",
                                         "function": {
                                             "name": "get_weather",
-                                            "arguments": '{"location": "San Francisco"}',
+                                            "arguments": (
+                                                '{"location": "San Francisco"}'
+                                            ),
                                         },
                                     }
                                 ],
@@ -322,7 +324,9 @@ class ChatCompletionChunkResponse(BaseModel):
                                         "type": "function",
                                         "function": {
                                             "name": "get_weather",
-                                            "arguments": '{"location": "San Francisco"}',
+                                            "arguments": (
+                                                '{"location": "San Francisco"}'
+                                            ),
                                         },
                                     }
                                 ]
