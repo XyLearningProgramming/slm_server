@@ -25,7 +25,7 @@ inputs:
     required: true
     default: 'backend'
   helm_set_files:
-    description: 'Comma-separated --set-file args, e.g. "configMapData.download\.sh=scripts/download.sh"'
+    description: 'Comma-separated --set-file args, e.g. "configMapData.download=scripts/download.sh"'
     required: false
     default: ''
   github_token:
@@ -101,7 +101,8 @@ runs:
         if [ -n "${{ inputs.helm_set_files }}" ]; then
           IFS=',' read -ra PAIRS <<< "${{ inputs.helm_set_files }}"
           for pair in "${PAIRS[@]}"; do
-            pair=$(echo "$pair" | xargs)
+            pair="${pair#"${pair%%[![:space:]]*}"}"
+            pair="${pair%"${pair##*[![:space:]]}"}"
             [ -n "$pair" ] && SET_FILE_FLAGS="$SET_FILE_FLAGS --set-file $pair"
           done
         fi

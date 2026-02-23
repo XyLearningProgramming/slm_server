@@ -128,7 +128,7 @@ probes:
     successThreshold: 1
     failureThreshold: 5
 
-# Content is injected at deploy time via: --set-file "configMapData.download\.sh=scripts/download.sh"
+# Content is injected at deploy time via: --set-file configMapData.download=scripts/download.sh
 configMapData: {}
 
 # Volumes and volumeMounts rendered via tpl so template expressions work.
@@ -140,6 +140,9 @@ volumes:
     configMap:
       name: '{{ include "slm-server.fullname" . }}-scripts'
       defaultMode: 0755
+      items:
+        - key: download
+          path: download.sh
 
 volumeMounts:
   - name: models-storage

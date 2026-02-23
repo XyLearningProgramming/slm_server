@@ -83,6 +83,6 @@ jobs:
         helm_values_env: ${{ secrets.HELM_VALUES_ENV }}
         helm_values_persistence_hostpath: ${{ secrets.HELM_VALUES_PERSISTENCE_HOSTPATH }}
         helm_values_persistence_nodename: ${{ secrets.HELM_VALUES_PERSISTENCE_NODENAME }}
-        helm_set_files: 'configMapData.download\.sh=scripts/download.sh'
+        helm_set_files: 'configMapData.download=scripts/download.sh'
         namespace: ${{ env.NAMESPACE }}
         github_token: ${{ secrets.GITHUB_TOKEN }}
