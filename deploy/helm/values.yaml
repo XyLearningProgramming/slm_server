@@ -79,14 +79,35 @@ env: {}
 
 # Resource requests and limits for the container.
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
-# Tuned for Qwen3-0.6B-Q4_K_M (484 MB) + n_ctx=8192 KV cache (~448 MB) on 1-CPU / 1 GB VPS nodes.
+#
+# Memory budget breakdown (target node: 1-CPU / 2 GB VPS):
+#   Chat LLM  – Qwen3-0.6B-Q4_K_M.gguf       ~484 MB (4-bit quantised)
+#   Embedding – all-MiniLM-L6-v2 quint8 ONNX   ~23 MB (uint8 AVX2 quantised)
+#   KV cache  – n_ctx=2048                     ~50-80 MB
+#   Runtime   – Python, FastAPI, onnxruntime   ~50-100 MB
+#   -------------------------------------------------------
+#   Total request: 550 Mi   Hard limit: 1 Gi
+#
+# Why these models:
+#   - Qwen3-0.6B-Q4_K_M is the smallest instruction-tuned LLM that still
+#     supports function calling (chatml format) at usable quality.
+#   - all-MiniLM-L6-v2 (384-dim, 6-layer) is purpose-trained for sentence
+#     embeddings via mean pooling, ranking well on STS benchmarks for its
+#     size. The quint8 AVX2 variant keeps the file at 23 MB vs 90 MB fp32.
+#
+# Why the limit is reasonable:
+#   - The worker node (active-nerd-2) has 2 GiB total RAM shared with the
+#     OS and other pods. 550 Mi request leaves headroom; the 1 Gi hard
+#     limit prevents OOM-kill from bursty KV-cache growth.
+#   - MAX_CONCURRENCY=1 ensures only one inference runs at a time, so peak
+#     memory is predictable (no concurrent KV-cache allocations).
 resources:
   limits:
-    cpu: 1
+    cpu: 900m
     memory: 1Gi
   requests:
-    cpu: 200m
-    memory: 600Mi
+    cpu: 50m
+    memory: 550Mi
 
 # Readiness and liveness probes configuration
 probes:

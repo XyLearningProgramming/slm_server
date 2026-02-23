@@ -6,7 +6,7 @@ from llama_cpp.llama_types import (
     ChatCompletionTool,
     ChatCompletionToolChoiceOption,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, conlist
 
 
 class ChatCompletionRequest(BaseModel):
@@ -83,11 +83,25 @@ class ChatCompletionRequest(BaseModel):
 
 
 # Embeddings API Models
+# OpenAI allows up to 2048 inputs per request.
+MAX_EMBEDDING_INPUTS = 2048
+
+
 class EmbeddingRequest(BaseModel):
-    input: str | list[str]
-    model: str | None = Field(
-        default=None, description="Model name, not important for our server"
-    )
+    input: str | conlist(str, max_length=MAX_EMBEDDING_INPUTS)
+    model: str | None = Field(default=None, description="Model identifier")
+
+
+class EmbeddingData(BaseModel):
+    object: str = Field(default="embedding")
+    embedding: list[float]
+    index: int
+
+
+class EmbeddingResponse(BaseModel):
+    object: str = Field(default="list")
+    data: list[EmbeddingData]
+    model: str
 
 
 # OpenAI-compatible list models API

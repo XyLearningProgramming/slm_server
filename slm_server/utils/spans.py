@@ -7,9 +7,7 @@ from llama_cpp import ChatCompletionStreamResponse
 from llama_cpp.llama_types import (
     CreateChatCompletionResponse as ChatCompletionResponse,
 )
-from llama_cpp.llama_types import (
-    CreateEmbeddingResponse as EmbeddingResponse,
-)
+from slm_server.model import EmbeddingResponse
 from opentelemetry import trace
 from opentelemetry.sdk.trace import Span
 from opentelemetry.trace import Status, StatusCode
@@ -34,6 +32,7 @@ from .constants import (
     ATTR_STREAMING,
     ATTR_TEMPERATURE,
     ATTR_TOTAL_TOKENS,
+    EMBEDDING_MODEL_NAME,
     EVENT_ATTR_CHUNK_CONTENT_SIZE,
     EVENT_ATTR_CHUNK_SIZE,
     EVENT_CHUNK_GENERATED,
@@ -133,24 +132,10 @@ def set_atrribute_response_stream(
         span.set_attribute(ATTR_CHUNK_COUNT, current_chunk_count + 1)
 
 
-def set_attribute_response_embedding(span: Span, response: EmbeddingResponse | dict):
+def set_attribute_response_embedding(span: Span, response: EmbeddingResponse):
     """Set embedding response attributes automatically."""
-    if isinstance(response, dict):
-        # Handle dict response
-        usage = response.get("usage")
-        if usage:
-            span.set_attribute(ATTR_PROMPT_TOKENS, usage.get("prompt_tokens", 0))
-            span.set_attribute(ATTR_TOTAL_TOKENS, usage.get("total_tokens", 0))
-        data = response.get("data")
-        if data:
-            span.set_attribute(ATTR_OUTPUT_COUNT, len(data))
-    else:
-        # Handle object response (original code)
-        if response.usage:
-            span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
-            span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
-        if response.data:
-            span.set_attribute(ATTR_OUTPUT_COUNT, len(response.data))
+    if response.data:
+        span.set_attribute(ATTR_OUTPUT_COUNT, len(response.data))
 
 
 def set_attribute_cancelled(span: Span, reason: str = "client disconnected"):
@@ -204,7 +189,7 @@ def slm_span(req: ChatCompletionRequest, is_streaming: bool):
 
 
 @contextmanager
-def slm_embedding_span(req: EmbeddingRequest):
+def slm_embedding_span(req: EmbeddingRequest, model_name: str = EMBEDDING_MODEL_NAME):
     """Create SLM span for embedding requests."""
     span_name = SPAN_EMBEDDING
 
@@ -216,7 +201,7 @@ def slm_embedding_span(req: EmbeddingRequest):
         input_content_length = len(req.input)
 
     initial_attributes = {
-        ATTR_MODEL: MODEL_NAME,
+        ATTR_MODEL: model_name,
         ATTR_INPUT_COUNT: input_count,
         ATTR_INPUT_CONTENT_LENGTH: input_content_length,
     }

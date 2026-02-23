@@ -16,6 +16,34 @@ DOTENV_PATH = PROJECT_ROOT / ".env"
 MODEL_PATH_DEFAULT = str(MODELS_DIR / "Qwen3-0.6B-Q4_K_M.gguf")
 MODEL_OWNER_DEFAULT = "second-state"
 
+EMBEDDING_TOKENIZER_PATH_DEFAULT = str(
+    MODELS_DIR / "all-MiniLM-L6-v2" / "tokenizer.json"
+)
+EMBEDDING_ONNX_PATH_DEFAULT = str(
+    MODELS_DIR / "all-MiniLM-L6-v2" / "onnx" / "model_quint8_avx2.onnx"
+)
+
+
+class EmbeddingSettings(BaseModel):
+    model_id: str = Field(
+        "all-MiniLM-L6-v2",
+        description="Model identifier returned in API responses.",
+    )
+    tokenizer_path: str = Field(
+        EMBEDDING_TOKENIZER_PATH_DEFAULT,
+        description="Full path to the tokenizer.json file.",
+    )
+    onnx_path: str = Field(
+        EMBEDDING_ONNX_PATH_DEFAULT,
+        description="Full path to the ONNX model file.",
+    )
+    max_length: int = Field(
+        256,
+        description="Maximum token sequence length for the tokenizer. "
+        "all-MiniLM-L6-v2 was trained with 256; increase only if "
+        "swapping to a model that supports longer sequences.",
+    )
+
 
 class LoggingSettings(BaseModel):
     verbose: bool = Field(True, description="If logging to stdout by cpp llama")
@@ -75,6 +103,7 @@ class Settings(BaseSettings):
         1, description="Seconds to wait if undergoing another inference."
     )
 
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     metrics: MetricsSettings = Field(default_factory=MetricsSettings)
     tracing: TraceSettings = Field(default_factory=TraceSettings)

@@ -36,4 +36,30 @@ for file in "${FILES_TO_DOWNLOAD[@]}"; do
     fi
 done
 
+# --- Embedding model: all-MiniLM-L6-v2 (ONNX, quantized UINT8 for AVX2) ---
+EMBEDDING_REPO_URL="https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL_DIR="$MODEL_DIR/all-MiniLM-L6-v2"
+
+mkdir -p "$EMBEDDING_MODEL_DIR/onnx"
+
+EMBEDDING_FILES=(
+    "onnx/model_quint8_avx2.onnx"
+    "tokenizer.json"
+)
+
+echo "Downloading all-MiniLM-L6-v2 ONNX embedding model..."
+
+for file in "${EMBEDDING_FILES[@]}"; do
+    dest="$EMBEDDING_MODEL_DIR/$file"
+    if [ -f "$dest" ]; then
+        echo "$file already exists, skipping download."
+    else
+        echo "Downloading $file..."
+        wget -O "$dest" "$EMBEDDING_REPO_URL/resolve/main/$file" || {
+            echo "Failed to download $file with wget, trying curl..."
+            curl -L -o "$dest" "$EMBEDDING_REPO_URL/resolve/main/$file"
+        }
+    fi
+done
+
 echo "Download process complete! Files are in $MODEL_DIR"
