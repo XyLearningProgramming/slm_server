@@ -18,10 +18,11 @@ run: ## Start server via start.sh
 lint: ## Run ruff linter
 	uv run ruff check slm_server/
 
-format: ## Run ruff formatter
+format: ## Run ruff linter (--fix) and formatter
+	uv run ruff check slm_server/ --fix
 	uv run ruff format slm_server/
 
-check: lint ## Run linter + formatter check
+check: lint ## Run linter + formatter check (CI)
 	uv run ruff format --check slm_server/
 
 smoke: ## Smoke-test the running server APIs with curl
