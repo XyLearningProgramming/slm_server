@@ -17,9 +17,7 @@ from typing import Any
 from slm_server.utils.ids import gen_id
 
 _THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
-_TOOL_CALL_RE = re.compile(
-    r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL
-)
+_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
 
 def extract_reasoning(content: str) -> tuple[str | None, str]:
@@ -151,9 +149,7 @@ class StreamPostProcessor:
 
     # -- public API ----------------------------------------------------------
 
-    def process_chunk(
-        self, chunk: dict[str, Any]
-    ) -> list[dict[str, Any]]:
+    def process_chunk(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
         """Process one streaming chunk, returning zero or more output chunks."""
         self._last_chunk_template = chunk
 
@@ -178,8 +174,11 @@ class StreamPostProcessor:
                     "tool_calls" if self._had_tool_calls else orig_finish
                 )
             else:
-                result.append(self._rewrite_finish(chunk) if self._had_tool_calls
-                              else self._stamp(copy.deepcopy(chunk)))
+                result.append(
+                    self._rewrite_finish(chunk)
+                    if self._had_tool_calls
+                    else self._stamp(copy.deepcopy(chunk))
+                )
 
         return result
 
@@ -193,9 +192,7 @@ class StreamPostProcessor:
 
     # -- internals -----------------------------------------------------------
 
-    def _consume_text(
-        self, text: str, chunk: dict[str, Any]
-    ) -> list[dict[str, Any]]:
+    def _consume_text(self, text: str, chunk: dict[str, Any]) -> list[dict[str, Any]]:
         """Feed *text* through the tag-detection state machine.
 
         Batches consecutive characters for the same state into single chunks
@@ -273,9 +270,7 @@ class StreamPostProcessor:
             self._tool_call_buf += text
             return []
 
-    def _finish_tool_call(
-        self, chunk: dict[str, Any]
-    ) -> list[dict[str, Any]]:
+    def _finish_tool_call(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
         """Parse the accumulated JSON and emit a ``tool_calls`` delta."""
         raw = self._tool_call_buf.strip()
         self._tool_call_buf = ""

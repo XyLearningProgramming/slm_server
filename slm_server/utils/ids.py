@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import string
 
-_LENGTH=12
+_LENGTH = 12
 _ALPHABET = string.ascii_letters + string.digits
 _BASE = len(_ALPHABET)
 

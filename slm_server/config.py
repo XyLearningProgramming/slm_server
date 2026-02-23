@@ -126,5 +126,6 @@ def get_settings() -> Settings:
         get_settings._instance = Settings()
     return get_settings._instance
 
+
 def get_model_id(settings: Annotated[Settings, Depends(get_settings)]) -> str:
     return settings.chat_model_id

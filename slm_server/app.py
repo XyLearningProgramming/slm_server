@@ -52,9 +52,7 @@ STATUS_CODE_EXCEPTION = HTTPStatus.INTERNAL_SERVER_ERROR
 STREAM_RESPONSE_MEDIA_TYPE = "text/event-stream"
 # Schema for streaming responses.
 STREAM_RESPONSE_SCHEMA = {
-    "schema": {
-        "$ref": "#/components/schemas/ChatCompletionChunkResponse"
-    }
+    "schema": {"$ref": "#/components/schemas/ChatCompletionChunkResponse"}
 }
 
 
