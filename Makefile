@@ -1,4 +1,4 @@
-.PHONY: dev run download install lint format check test smoke clean help
+.PHONY: dev run download install lint format check test smoke swagger clean help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -29,6 +29,10 @@ smoke: ## Smoke-test the running server APIs with curl
 
 test: ## Run tests with coverage
 	uv run pytest tests/ -v --cov=slm_server --cov-report=term-missing
+
+swagger: ## Refresh OpenAPI spec from running server
+	curl -sf http://localhost:8000/openapi.json | uv run python -c "import sys,json,yaml;yaml.dump(json.load(sys.stdin),sys.stdout,default_flow_style=False,sort_keys=False,allow_unicode=True)" > swagger/openapi.yaml
+	@echo "swagger/openapi.yaml updated"
 
 clean: ## Remove caches and build artifacts
 	rm -rf __pycache__ .pytest_cache .ruff_cache .coverage htmlcov build dist *.egg-info

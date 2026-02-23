@@ -204,7 +204,7 @@ def test_streaming_stops_on_client_disconnect():
     
     cancellation_triggered = False
     
-    async def mock_run_llm_streaming_with_cancellation(llm, req):
+    async def mock_run_llm_streaming_with_cancellation(llm, req, *, model_id="test"):
         """Mock that yields some chunks then gets cancelled by client disconnect."""
         nonlocal cancellation_triggered
         from slm_server.utils.spans import slm_span, set_atrribute_response_stream

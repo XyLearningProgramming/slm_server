@@ -9,12 +9,14 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from llama_cpp import CreateChatCompletionStreamResponse, Llama
 
-from slm_server.config import Settings, get_settings
+from slm_server.config import Settings, get_model_id, get_settings
 from slm_server.embedding import OnnxEmbeddingModel
 from slm_server.logging import setup_logging
 from slm_server.metrics import setup_metrics
 from slm_server.model import (
+    ChatCompletionChunkResponse,
     ChatCompletionRequest,
+    ChatCompletionResponse,
     EmbeddingData,
     EmbeddingRequest,
     EmbeddingResponse,
@@ -29,14 +31,16 @@ from slm_server.utils import (
     slm_embedding_span,
     slm_span,
 )
+from slm_server.utils.postprocess import StreamPostProcessor, postprocess_completion
 
 # MAX_CONCURRENCY decides how many threads are calling model.
 # Default to 1 since llama cpp is designed to be at most efficiency
 # for single thread. Meanwhile, value larger than 1 allows
 # threads to compete for same resources.
 MAX_CONCURRENCY = 1
-# Keeps function calling and also compatible with ReAct agents.
-CHAT_FORMAT = "chatml-function-calling"
+# Use the model's built-in Jinja chat template from the GGUF metadata,
+# which handles tool formatting natively (e.g. Qwen3, Llama 3, etc.).
+CHAT_FORMAT = None
 # Default timeout message in detail field.
 DETAIL_SEM_TIMEOUT = "Server is busy, please try again later."
 # Status code for semaphore timeout.
@@ -130,7 +134,7 @@ def raise_as_http_exception() -> Generator[Literal[True], None, None]:
 
 
 async def run_llm_streaming(
-    llm: Llama, req: ChatCompletionRequest
+    llm: Llama, req: ChatCompletionRequest, *, model_id: str
 ) -> AsyncGenerator[str, None]:
     """Generator that runs the LLM and yields SSE chunks under lock."""
     with slm_span(req, is_streaming=True) as span:
@@ -139,58 +143,79 @@ async def run_llm_streaming(
             **req.model_dump(),
         )
 
-        # Use traced iterator that automatically handles chunk spans
-        # and parent span updates
+        processor = StreamPostProcessor(model_id=model_id)
         chunk: CreateChatCompletionStreamResponse
         for chunk in completion_stream:
-            set_atrribute_response_stream(span, chunk)
-            yield f"data: {json.dumps(chunk)}\n\n"
-            # NOTE: This is a workaround to yield control back to the event loop
-            # to allow checking for socket after yield and pop in CancelledError.
-            # Ref: https://github.com/encode/starlette/discussions/1776#discussioncomment-3207518
-            await asyncio.sleep(0)
+            for out_chunk in processor.process_chunk(chunk):
+                set_atrribute_response_stream(span, out_chunk)
+                yield f"data: {json.dumps(out_chunk)}\n\n"
+                # NOTE: yield control back to the event loop so starlette
+                # can detect client disconnects between chunks.
+                # Ref: https://github.com/encode/starlette/discussions/1776#discussioncomment-3207518
+                await asyncio.sleep(0)
+
+        for out_chunk in processor.flush():
+            set_atrribute_response_stream(span, out_chunk)
+            yield f"data: {json.dumps(out_chunk)}\n\n"
 
         yield "data: [DONE]\n\n"
 
 
-async def run_llm_non_streaming(llm: Llama, req: ChatCompletionRequest):
+async def run_llm_non_streaming(
+    llm: Llama, req: ChatCompletionRequest, *, model_id: str
+):
     """Runs the LLM for a non-streaming request under lock."""
     with slm_span(req, is_streaming=False) as span:
         completion_result = await asyncio.to_thread(
             llm.create_chat_completion,
             **req.model_dump(),
         )
+        postprocess_completion(completion_result, model_id=model_id)
         set_atrribute_response(span, completion_result)
 
         return completion_result
 
 
-@app.post("/api/v1/chat/completions")
+@app.post(
+    "/api/v1/chat/completions",
+    response_model=ChatCompletionResponse,
+    responses={
+        200: {
+            "content": {
+                STREAM_RESPONSE_MEDIA_TYPE: {
+                    "schema": ChatCompletionChunkResponse.model_json_schema(),
+                }
+            },
+        },
+    },
+)
 async def create_chat_completion(
     req: ChatCompletionRequest,
     llm: Annotated[Llama, Depends(get_llm)],
+    model_id: Annotated[str, Depends(get_model_id)],
     _: Annotated[None, Depends(lock_llm_semaphor)],
     __: Annotated[None, Depends(raise_as_http_exception)],
-):
+) -> ChatCompletionResponse:
     """
     Generates a chat completion, handling both streaming and non-streaming cases.
     Concurrency is managed by the `locked_llm_session` context manager.
     """
     if req.stream:
         return StreamingResponse(
-            run_llm_streaming(llm, req), media_type=STREAM_RESPONSE_MEDIA_TYPE
+            run_llm_streaming(llm, req, model_id=model_id),
+            media_type=STREAM_RESPONSE_MEDIA_TYPE,
         )
     else:
-        return await run_llm_non_streaming(llm, req)
+        return await run_llm_non_streaming(llm, req, model_id=model_id)
 
 
-@app.post("/api/v1/embeddings")
+@app.post("/api/v1/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(
     req: EmbeddingRequest,
     emb_model: Annotated[OnnxEmbeddingModel, Depends(get_embedding_model)],
     _: Annotated[None, Depends(lock_llm_semaphor)],
     __: Annotated[None, Depends(raise_as_http_exception)],
-):
+) -> EmbeddingResponse:
     """Create embeddings using the dedicated ONNX embedding model."""
     with slm_embedding_span(req) as span:
         inputs = req.input if isinstance(req.input, list) else [req.input]
@@ -211,7 +236,6 @@ async def list_models(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ModelListResponse:
     """List available models (OpenAI-compatible)."""
-    chat_model_id = Path(settings.model_path).stem
     try:
         chat_created = int(Path(settings.model_path).stat().st_mtime)
     except (OSError, ValueError):
@@ -225,7 +249,7 @@ async def list_models(
     return ModelListResponse(
         data=[
             ModelInfo(
-                id=chat_model_id,
+                id=settings.chat_model_id,
                 created=chat_created,
                 owned_by=settings.model_owner,
             ),
