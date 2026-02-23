@@ -14,11 +14,11 @@ from llama_cpp.llama_types import (
     ChatCompletionToolChoiceOption,
 )
 from pydantic import (
-    BaseModel, 
-    ConfigDict, 
-    Field, 
-    conlist, 
-    field_validator, 
+    BaseModel,
+    ConfigDict,
+    Field,
+    conlist,
+    field_validator,
     model_validator
 )
 
