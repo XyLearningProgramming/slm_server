@@ -18,6 +18,8 @@ dependencies = [
     "prometheus-client>=0.22.1",
     "prometheus-fastapi-instrumentator>=7.1.0",
     "psutil>=6.1.0",
+    "onnxruntime>=1.17.0",
+    "tokenizers>=0.21.0",
 ]
 
 [tool.ruff.lint]

@@ -10,11 +10,14 @@ from fastapi.responses import StreamingResponse
 from llama_cpp import CreateChatCompletionStreamResponse, Llama
 
 from slm_server.config import Settings, get_settings
+from slm_server.embedding import OnnxEmbeddingModel
 from slm_server.logging import setup_logging
 from slm_server.metrics import setup_metrics
 from slm_server.model import (
     ChatCompletionRequest,
+    EmbeddingData,
     EmbeddingRequest,
+    EmbeddingResponse,
     ModelInfo,
     ModelListResponse,
 )
@@ -62,11 +65,19 @@ def get_llm(settings: Annotated[Settings, Depends(get_settings)]) -> Llama:
             seed=settings.seed,
             chat_format=CHAT_FORMAT,
             logits_all=False,
-            embedding=True,
-            use_mlock=True,  # Use mlock to prevent memory swapping
-            use_mmap=True,  # Use memory-mapped files for faster access
+            embedding=False,
+            use_mlock=True,
+            use_mmap=True,
         )
     return get_llm._instance
+
+
+def get_embedding_model(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> OnnxEmbeddingModel:
+    if not hasattr(get_embedding_model, "_instance"):
+        get_embedding_model._instance = OnnxEmbeddingModel(settings.embedding)
+    return get_embedding_model._instance
 
 
 def get_app() -> FastAPI:
@@ -176,41 +187,55 @@ async def create_chat_completion(
 @app.post("/api/v1/embeddings")
 async def create_embeddings(
     req: EmbeddingRequest,
-    llm: Annotated[Llama, Depends(get_llm)],
+    emb_model: Annotated[OnnxEmbeddingModel, Depends(get_embedding_model)],
     _: Annotated[None, Depends(lock_llm_semaphor)],
     __: Annotated[None, Depends(raise_as_http_exception)],
 ):
-    """Create embeddings for the given input text(s)."""
+    """Create embeddings using the dedicated ONNX embedding model."""
     with slm_embedding_span(req) as span:
-        # Use llama-cpp-python's create_embedding method directly
-        embedding_result = await asyncio.to_thread(
-            llm.create_embedding,
-            **req.model_dump(),
+        inputs = req.input if isinstance(req.input, list) else [req.input]
+        vectors = await asyncio.to_thread(
+            emb_model.encode, inputs, True
         )
-        # Convert llama-cpp response using model_validate like chat completion
-        set_attribute_response_embedding(span, embedding_result)
-        return embedding_result
+        result = EmbeddingResponse(
+            data=[
+                EmbeddingData(embedding=vec.tolist(), index=i)
+                for i, vec in enumerate(vectors)
+            ],
+            model=emb_model.model_id,
+        )
+        set_attribute_response_embedding(span, result)
+        return result
 
 
 @app.get("/api/v1/models", response_model=ModelListResponse)
 async def list_models(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ModelListResponse:
-    """List available models (OpenAI-compatible). Returns the single loaded model."""
-    model_id = Path(settings.model_path).stem
+    """List available models (OpenAI-compatible)."""
+    chat_model_id = Path(settings.model_path).stem
     try:
-        created = int(Path(settings.model_path).stat().st_mtime)
+        chat_created = int(Path(settings.model_path).stat().st_mtime)
     except (OSError, ValueError):
-        created = 0
+        chat_created = 0
+
+    try:
+        emb_created = int(Path(settings.embedding.onnx_path).stat().st_mtime)
+    except (OSError, ValueError):
+        emb_created = 0
+
     return ModelListResponse(
-        object="list",
         data=[
             ModelInfo(
-                id=model_id,
-                object="model",
-                created=created,
+                id=chat_model_id,
+                created=chat_created,
                 owned_by=settings.model_owner,
-            )
+            ),
+            ModelInfo(
+                id=settings.embedding.model_id,
+                created=emb_created,
+                owned_by="sentence-transformers",
+            ),
         ],
     )
 

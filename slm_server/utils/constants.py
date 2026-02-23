@@ -1,5 +1,6 @@
 # Constants for span naming and attributes
 MODEL_NAME = "llama-cpp"
+EMBEDDING_MODEL_NAME = "onnx-minilm"
 SPAN_PREFIX = "slm"
 
 # Span names

@@ -8,11 +8,23 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import set_tracer_provider
 
-from slm_server.app import DETAIL_SEM_TIMEOUT, app, get_llm, get_settings
+import numpy as np
+
+from slm_server.app import (
+    DETAIL_SEM_TIMEOUT,
+    app,
+    get_embedding_model,
+    get_llm,
+    get_settings,
+)
 from slm_server.config import Settings
 
 # Create a mock Llama instance
 mock_llama = MagicMock()
+
+# Create a mock embedding model
+mock_embedding_model = MagicMock()
+mock_embedding_model.model_id = "all-MiniLM-L6-v2"
 
 # Set up OpenTelemetry for tests
 tracer_provider = TracerProvider()
@@ -26,7 +38,12 @@ def override_get_llm():
     return mock_llama
 
 
+def override_get_embedding_model():
+    return mock_embedding_model
+
+
 app.dependency_overrides[get_llm] = override_get_llm
+app.dependency_overrides[get_embedding_model] = override_get_embedding_model
 
 # Use TestClient with lifespan context to ensure metrics endpoint is created
 client = TestClient(app)
@@ -36,8 +53,9 @@ client = TestClient(app)
 def reset_mock():
     """Reset the mock before each test."""
     mock_llama.reset_mock()
-    mock_llama.create_chat_completion.side_effect = None  # Clear any side effects
-    mock_llama.create_embedding.side_effect = None  # Clear any side effects for embedding
+    mock_llama.create_chat_completion.side_effect = None
+    mock_embedding_model.reset_mock()
+    mock_embedding_model.encode.side_effect = None
     
     # Patch the tracer in utils.py to use our test tracer
     local_tracer = tracer_provider.get_tracer(__name__)
@@ -489,21 +507,7 @@ def test_streaming_call_with_empty_chunks():
 
 def test_embeddings_endpoint_string_input():
     """Tests the embeddings endpoint with string input."""
-    mock_llama.create_embedding.return_value = {
-        "object": "list",
-        "data": [
-            {
-                "object": "embedding",
-                "embedding": [0.1, -0.2, 0.3, -0.4, 0.5],
-                "index": 0
-            }
-        ],
-        "model": "test-model",
-        "usage": {
-            "prompt_tokens": 5,
-            "total_tokens": 5
-        }
-    }
+    mock_embedding_model.encode.return_value = np.array([[0.1, -0.2, 0.3, -0.4, 0.5]])
 
     response = client.post(
         "/api/v1/embeddings",
@@ -518,39 +522,17 @@ def test_embeddings_endpoint_string_input():
     assert response_data["data"][0]["object"] == "embedding"
     assert response_data["data"][0]["embedding"] == [0.1, -0.2, 0.3, -0.4, 0.5]
     assert response_data["data"][0]["index"] == 0
-    assert response_data["model"] == "test-model"
-    assert response_data["usage"]["prompt_tokens"] == 5
-    assert response_data["usage"]["total_tokens"] == 5
+    assert response_data["model"] == "all-MiniLM-L6-v2"
     
-    # Verify the LLM was called correctly
-    mock_llama.create_embedding.assert_called_once_with(
-        input="Hello world",
-        model="test-model"
-    )
+    mock_embedding_model.encode.assert_called_once_with(["Hello world"], True)
 
 
 def test_embeddings_endpoint_list_input():
     """Tests the embeddings endpoint with list input."""
-    mock_llama.create_embedding.return_value = {
-        "object": "list", 
-        "data": [
-            {
-                "object": "embedding",
-                "embedding": [0.1, 0.2, 0.3],
-                "index": 0
-            },
-            {
-                "object": "embedding",
-                "embedding": [0.4, 0.5, 0.6],
-                "index": 1
-            }
-        ],
-        "model": "test-model",
-        "usage": {
-            "prompt_tokens": 10,
-            "total_tokens": 10
-        }
-    }
+    mock_embedding_model.encode.return_value = np.array([
+        [0.1, 0.2, 0.3],
+        [0.4, 0.5, 0.6],
+    ])
 
     response = client.post(
         "/api/v1/embeddings",
@@ -564,32 +546,15 @@ def test_embeddings_endpoint_list_input():
     assert len(response_data["data"]) == 2
     assert response_data["data"][0]["embedding"] == [0.1, 0.2, 0.3]
     assert response_data["data"][1]["embedding"] == [0.4, 0.5, 0.6]
-    assert response_data["usage"]["prompt_tokens"] == 10
     
-    # Verify the LLM was called correctly
-    mock_llama.create_embedding.assert_called_once_with(
-        input=["First text", "Second text"],
-        model="test-model"
+    mock_embedding_model.encode.assert_called_once_with(
+        ["First text", "Second text"], True
     )
 
 
 def test_embeddings_endpoint_default_model():
-    """Tests the embeddings endpoint with default model."""
-    mock_llama.create_embedding.return_value = {
-        "object": "list",
-        "data": [
-            {
-                "object": "embedding",
-                "embedding": [0.1, 0.2],
-                "index": 0
-            }
-        ],
-        "model": "Qwen3-0.6B-GGUF",
-        "usage": {
-            "prompt_tokens": 3,
-            "total_tokens": 3
-        }
-    }
+    """Tests the embeddings endpoint with default model (from settings)."""
+    mock_embedding_model.encode.return_value = np.array([[0.1, 0.2]])
 
     response = client.post(
         "/api/v1/embeddings",
@@ -599,18 +564,13 @@ def test_embeddings_endpoint_default_model():
     assert response.status_code == 200
     response_data = response.json()
     
-    assert response_data["model"] == "Qwen3-0.6B-GGUF"
-    
-    # Verify default model was used
-    mock_llama.create_embedding.assert_called_once_with(
-        input="Test",
-        model=None  # Default model is None
-    )
+    # When no model is specified, the settings model_id is used
+    assert response_data["model"] == "all-MiniLM-L6-v2"
 
 
 def test_embeddings_endpoint_error():
     """Tests the embeddings endpoint error handling."""
-    mock_llama.create_embedding.side_effect = Exception("Embedding failed")
+    mock_embedding_model.encode.side_effect = Exception("Embedding failed")
 
     response = client.post(
         "/api/v1/embeddings",
@@ -623,21 +583,7 @@ def test_embeddings_endpoint_error():
 
 def test_embeddings_endpoint_empty_input():
     """Tests the embeddings endpoint with empty input."""
-    mock_llama.create_embedding.return_value = {
-        "object": "list",
-        "data": [
-            {
-                "object": "embedding", 
-                "embedding": [0.0, 0.0],
-                "index": 0
-            }
-        ],
-        "model": "test-model",
-        "usage": {
-            "prompt_tokens": 0,
-            "total_tokens": 0
-        }
-    }
+    mock_embedding_model.encode.return_value = np.array([[0.0, 0.0]])
 
     response = client.post(
         "/api/v1/embeddings",
@@ -648,32 +594,27 @@ def test_embeddings_endpoint_empty_input():
     response_data = response.json()
     
     assert len(response_data["data"]) == 1
-    assert response_data["usage"]["prompt_tokens"] == 0
     
-    # Verify empty string was passed through
-    mock_llama.create_embedding.assert_called_once_with(
-        input="",
-        model="test-model"
+    mock_embedding_model.encode.assert_called_once_with([""], True)
+
+
+def test_embeddings_endpoint_rejects_too_many_inputs():
+    """Tests the embeddings endpoint rejects input list exceeding max items."""
+    from slm_server.model import MAX_EMBEDDING_INPUTS
+
+    too_many = ["text"] * (MAX_EMBEDDING_INPUTS + 1)
+    response = client.post(
+        "/api/v1/embeddings",
+        json={"input": too_many, "model": "test-model"},
     )
+    assert response.status_code == 422
 
 
 def test_embeddings_endpoint_with_tracing_integration():
     """Integration test for embeddings endpoint with complete tracing flow."""
-    mock_llama.create_embedding.return_value = {
-        "object": "list",
-        "data": [
-            {
-                "object": "embedding",
-                "embedding": [0.1, -0.2, 0.3, -0.4, 0.5, 0.6, -0.7, 0.8],
-                "index": 0
-            }
-        ],
-        "model": "test-model",
-        "usage": {
-            "prompt_tokens": 8,
-            "total_tokens": 8
-        }
-    }
+    mock_embedding_model.encode.return_value = np.array(
+        [[0.1, -0.2, 0.3, -0.4, 0.5, 0.6, -0.7, 0.8]]
+    )
 
     response = client.post(
         "/api/v1/embeddings",
@@ -686,19 +627,12 @@ def test_embeddings_endpoint_with_tracing_integration():
     assert response.status_code == 200
     response_data = response.json()
     
-    # Verify response structure
     assert response_data["object"] == "list"
     assert len(response_data["data"]) == 1
     assert len(response_data["data"][0]["embedding"]) == 8
-    assert response_data["usage"]["prompt_tokens"] == 8
-    assert response_data["usage"]["total_tokens"] == 8
+    assert response_data["model"] == "all-MiniLM-L6-v2"
     
-    # Verify the LLM was called with correct parameters
-    mock_llama.create_embedding.assert_called_once()
-    call_args = mock_llama.create_embedding.call_args
-    
-    assert call_args[1]["input"] == "This is a test sentence for creating embeddings."
-    assert call_args[1]["model"] == "test-model"
+    mock_embedding_model.encode.assert_called_once()
 
 
 def test_request_validation_and_defaults():
@@ -734,18 +668,24 @@ def test_request_validation_and_defaults():
 
 
 def test_list_models_structure():
-    """GET /api/v1/models returns OpenAI-compatible list with one model."""
+    """GET /api/v1/models returns OpenAI-compatible list with chat and embedding models."""
     response = client.get("/api/v1/models")
     assert response.status_code == 200
     data = response.json()
     assert data["object"] == "list"
     assert isinstance(data["data"], list)
-    assert len(data["data"]) == 1
-    model = data["data"][0]
-    assert model["object"] == "model"
-    assert "id" in model and isinstance(model["id"], str)
-    assert "created" in model and isinstance(model["created"], int)
-    assert model["owned_by"] == "second-state"
+    assert len(data["data"]) == 2
+
+    chat_model = data["data"][0]
+    assert chat_model["object"] == "model"
+    assert "id" in chat_model and isinstance(chat_model["id"], str)
+    assert "created" in chat_model and isinstance(chat_model["created"], int)
+    assert chat_model["owned_by"] == "second-state"
+
+    emb_model = data["data"][1]
+    assert emb_model["object"] == "model"
+    assert emb_model["id"] == "all-MiniLM-L6-v2"
+    assert emb_model["owned_by"] == "sentence-transformers"
 
 
 def test_list_models_with_overridden_settings():
@@ -764,12 +704,12 @@ def test_list_models_with_overridden_settings():
         assert response.status_code == 200
         data = response.json()
         assert data["object"] == "list"
-        assert len(data["data"]) == 1
-        model = data["data"][0]
-        assert model["id"] == "SomeModel"
-        assert model["object"] == "model"
-        assert model["owned_by"] == "custom-org"
-        assert model["created"] == 0  # file does not exist
+        assert len(data["data"]) == 2
+        chat_model = data["data"][0]
+        assert chat_model["id"] == "SomeModel"
+        assert chat_model["object"] == "model"
+        assert chat_model["owned_by"] == "custom-org"
+        assert chat_model["created"] == 0  # file does not exist
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
@@ -788,10 +728,10 @@ def test_list_models_created_from_existing_file(tmp_path):
     try:
         response = client.get("/api/v1/models")
         assert response.status_code == 200
-        model = response.json()["data"][0]
-        assert model["id"] == "RealModel"
-        assert model["created"] > 0
-        assert model["created"] == int(model_file.stat().st_mtime)
+        chat_model = response.json()["data"][0]
+        assert chat_model["id"] == "RealModel"
+        assert chat_model["created"] > 0
+        assert chat_model["created"] == int(model_file.stat().st_mtime)
     finally:
         app.dependency_overrides.pop(get_settings, None)
 
