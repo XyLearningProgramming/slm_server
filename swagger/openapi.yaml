@@ -1,0 +1,1081 @@
+openapi: 3.1.0
+info:
+  title: OpenAI-compatible SLM Server
+  description: A simple API server for serving a Small Language Model, compatible
+    with the OpenAI Chat Completions format.
+  version: 0.1.0
+paths:
+  /metrics:
+    get:
+      summary: Metrics
+      description: Endpoint that serves Prometheus metrics.
+      operationId: metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /api/v1/chat/completions:
+    post:
+      summary: Create Chat Completion
+      description: 'Generates a chat completion, handling both streaming and non-streaming
+        cases.
+
+        Concurrency is managed by the `locked_llm_session` context manager.'
+      operationId: create_chat_completion_api_v1_chat_completions_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionChunkResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/embeddings:
+    post:
+      summary: Create Embeddings
+      description: Create embeddings using the dedicated ONNX embedding model.
+      operationId: create_embeddings_api_v1_embeddings_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbeddingRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmbeddingResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/models:
+    get:
+      summary: List Models
+      description: List available models (OpenAI-compatible).
+      operationId: list_models_api_v1_models_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelListResponse'
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    ChatCompletionChoice:
+      properties:
+        index:
+          type: integer
+          title: Index
+        message:
+          $ref: '#/components/schemas/ChatMessage'
+        logprobs:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Logprobs
+        finish_reason:
+          anyOf:
+          - type: string
+            enum:
+            - stop
+            - length
+            - tool_calls
+            - function_call
+          - type: 'null'
+          title: Finish Reason
+      type: object
+      required:
+      - index
+      - message
+      title: ChatCompletionChoice
+    ChatCompletionFunction:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        parameters:
+          additionalProperties:
+            anyOf:
+            - type: integer
+            - type: string
+            - type: boolean
+            - items: {}
+              type: array
+            - additionalProperties: true
+              type: object
+            - type: 'null'
+          type: object
+          title: Parameters
+      type: object
+      required:
+      - name
+      - parameters
+      title: ChatCompletionFunction
+    ChatCompletionMessageToolCall:
+      properties:
+        id:
+          type: string
+          title: Id
+        type:
+          type: string
+          const: function
+          title: Type
+        function:
+          $ref: '#/components/schemas/ChatCompletionMessageToolCallFunction'
+      type: object
+      required:
+      - id
+      - type
+      - function
+      title: ChatCompletionMessageToolCall
+    ChatCompletionMessageToolCallFunction:
+      properties:
+        name:
+          type: string
+          title: Name
+        arguments:
+          type: string
+          title: Arguments
+      type: object
+      required:
+      - name
+      - arguments
+      title: ChatCompletionMessageToolCallFunction
+    ChatCompletionNamedToolChoice:
+      properties:
+        type:
+          type: string
+          const: function
+          title: Type
+        function:
+          $ref: '#/components/schemas/ChatCompletionNamedToolChoiceFunction'
+      type: object
+      required:
+      - type
+      - function
+      title: ChatCompletionNamedToolChoice
+    ChatCompletionNamedToolChoiceFunction:
+      properties:
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - name
+      title: ChatCompletionNamedToolChoiceFunction
+    ChatCompletionRequest:
+      properties:
+        messages:
+          items:
+            anyOf:
+            - $ref: '#/components/schemas/ChatCompletionRequestSystemMessage'
+            - $ref: '#/components/schemas/ChatCompletionRequestUserMessage'
+            - $ref: '#/components/schemas/ChatCompletionRequestAssistantMessage'
+            - $ref: '#/components/schemas/ChatCompletionRequestToolMessage'
+            - $ref: '#/components/schemas/ChatCompletionRequestFunctionMessage'
+          type: array
+          title: Messages
+          description: List of chat completion messages in the conversation
+        functions:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ChatCompletionFunction'
+            type: array
+          - type: 'null'
+          title: Functions
+          description: List of functions available for the model to call
+        function_call:
+          anyOf:
+          - type: string
+            enum:
+            - none
+            - auto
+          - $ref: '#/components/schemas/ChatCompletionRequestFunctionCallOption'
+          - type: 'null'
+          title: Function Call
+          description: Controls which function the model should call
+        tools:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ChatCompletionTool'
+            type: array
+          - type: 'null'
+          title: Tools
+          description: List of tools available for the model to use
+        tool_choice:
+          anyOf:
+          - type: string
+            enum:
+            - none
+            - auto
+            - required
+          - $ref: '#/components/schemas/ChatCompletionNamedToolChoice'
+          - type: 'null'
+          title: Tool Choice
+          description: Controls which tool the model should use
+        temperature:
+          type: number
+          title: Temperature
+          description: Sampling temperature (0.0 to 2.0)
+          default: 0.2
+        top_p:
+          type: number
+          title: Top P
+          description: Nucleus sampling parameter
+          default: 0.95
+        top_k:
+          type: integer
+          title: Top K
+          description: Top-k sampling parameter
+          default: 40
+        min_p:
+          type: number
+          title: Min P
+          description: Minimum probability threshold for sampling
+          default: 0.05
+        typical_p:
+          type: number
+          title: Typical P
+          description: Typical sampling parameter
+          default: 1.0
+        stream:
+          type: boolean
+          title: Stream
+          description: Whether to stream the response
+          default: false
+        stop:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Stop
+          description: Stop sequences to end generation
+        seed:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Seed
+          description: Random seed for reproducible generation
+        response_format:
+          anyOf:
+          - $ref: '#/components/schemas/ChatCompletionRequestResponseFormat'
+          - type: 'null'
+          description: Response format specification
+        max_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Tokens
+          description: Maximum number of tokens to generate
+        presence_penalty:
+          type: number
+          title: Presence Penalty
+          description: Presence penalty (-2.0 to 2.0)
+          default: 0.0
+        frequency_penalty:
+          type: number
+          title: Frequency Penalty
+          description: Frequency penalty (-2.0 to 2.0)
+          default: 0.0
+        repeat_penalty:
+          type: number
+          title: Repeat Penalty
+          description: Repetition penalty (1.0 = no penalty)
+          default: 1.0
+        tfs_z:
+          type: number
+          title: Tfs Z
+          description: Tail free sampling parameter
+          default: 1.0
+        mirostat_mode:
+          type: integer
+          title: Mirostat Mode
+          description: Mirostat sampling mode (0=disabled, 1=v1, 2=v2)
+          default: 0
+        mirostat_tau:
+          type: number
+          title: Mirostat Tau
+          description: Mirostat target entropy
+          default: 5.0
+        mirostat_eta:
+          type: number
+          title: Mirostat Eta
+          description: Mirostat learning rate
+          default: 0.1
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Model identifier
+        logit_bias:
+          anyOf:
+          - additionalProperties:
+              type: number
+            type: object
+          - type: 'null'
+          title: Logit Bias
+          description: Logit bias adjustments for specific tokens
+        logprobs:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Logprobs
+          description: Whether to return log probabilities
+        top_logprobs:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Top Logprobs
+          description: Number of top log probabilities to return
+      type: object
+      required:
+      - messages
+      title: ChatCompletionRequest
+    ChatCompletionRequestAssistantMessage:
+      properties:
+        role:
+          type: string
+          const: assistant
+          title: Role
+        content:
+          type: string
+          title: Content
+        tool_calls:
+          items:
+            $ref: '#/components/schemas/ChatCompletionMessageToolCall'
+          type: array
+          title: Tool Calls
+        function_call:
+          $ref: '#/components/schemas/ChatCompletionRequestAssistantMessageFunctionCall'
+      type: object
+      required:
+      - role
+      title: ChatCompletionRequestAssistantMessage
+    ChatCompletionRequestAssistantMessageFunctionCall:
+      properties:
+        name:
+          type: string
+          title: Name
+        arguments:
+          type: string
+          title: Arguments
+      type: object
+      required:
+      - name
+      - arguments
+      title: ChatCompletionRequestAssistantMessageFunctionCall
+    ChatCompletionRequestFunctionCallOption:
+      properties:
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - name
+      title: ChatCompletionRequestFunctionCallOption
+    ChatCompletionRequestFunctionMessage:
+      properties:
+        role:
+          type: string
+          const: function
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+        name:
+          type: string
+          title: Name
+      type: object
+      required:
+      - role
+      - content
+      - name
+      title: ChatCompletionRequestFunctionMessage
+    ChatCompletionRequestMessageContentPartImage:
+      properties:
+        type:
+          type: string
+          const: image_url
+          title: Type
+        image_url:
+          anyOf:
+          - type: string
+          - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartImageImageUrl'
+          title: Image Url
+      type: object
+      required:
+      - type
+      - image_url
+      title: ChatCompletionRequestMessageContentPartImage
+    ChatCompletionRequestMessageContentPartImageImageUrl:
+      properties:
+        url:
+          type: string
+          title: Url
+        detail:
+          type: string
+          enum:
+          - auto
+          - low
+          - high
+          title: Detail
+      type: object
+      required:
+      - url
+      title: ChatCompletionRequestMessageContentPartImageImageUrl
+    ChatCompletionRequestMessageContentPartText:
+      properties:
+        type:
+          type: string
+          const: text
+          title: Type
+        text:
+          type: string
+          title: Text
+      type: object
+      required:
+      - type
+      - text
+      title: ChatCompletionRequestMessageContentPartText
+    ChatCompletionRequestResponseFormat:
+      properties:
+        type:
+          type: string
+          enum:
+          - text
+          - json_object
+          title: Type
+        schema:
+          anyOf:
+          - type: integer
+          - type: string
+          - type: boolean
+          - items: {}
+            type: array
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Schema
+      type: object
+      required:
+      - type
+      title: ChatCompletionRequestResponseFormat
+    ChatCompletionRequestSystemMessage:
+      properties:
+        role:
+          type: string
+          const: system
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+      type: object
+      required:
+      - role
+      - content
+      title: ChatCompletionRequestSystemMessage
+    ChatCompletionRequestToolMessage:
+      properties:
+        role:
+          type: string
+          const: tool
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+        tool_call_id:
+          type: string
+          title: Tool Call Id
+      type: object
+      required:
+      - role
+      - content
+      - tool_call_id
+      title: ChatCompletionRequestToolMessage
+    ChatCompletionRequestUserMessage:
+      properties:
+        role:
+          type: string
+          const: user
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - items:
+              anyOf:
+              - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartText'
+              - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartImage'
+            type: array
+          - type: 'null'
+          title: Content
+      type: object
+      required:
+      - role
+      - content
+      title: ChatCompletionRequestUserMessage
+    ChatCompletionResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        object:
+          type: string
+          const: chat.completion
+          title: Object
+          default: chat.completion
+        created:
+          type: integer
+          title: Created
+        model:
+          type: string
+          title: Model
+        choices:
+          items:
+            $ref: '#/components/schemas/ChatCompletionChoice'
+          type: array
+          title: Choices
+        usage:
+          $ref: '#/components/schemas/CompletionUsage'
+      type: object
+      required:
+      - id
+      - created
+      - model
+      - choices
+      - usage
+      title: ChatCompletionResponse
+      examples:
+      - choices:
+        - finish_reason: stop
+          index: 0
+          message:
+            content: Hi there!
+            reasoning_content: The user wants a greeting.
+            role: assistant
+        created: 1771828648
+        id: chatcmpl_MInMfQVLOPebdbjF
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion
+        usage:
+          completion_tokens: 149
+          prompt_tokens: 14
+          total_tokens: 163
+      - choices:
+        - finish_reason: tool_calls
+          index: 0
+          message:
+            role: assistant
+            tool_calls:
+            - function:
+                arguments: '{"location": "San Francisco"}'
+                name: get_weather
+              id: call_2HWeVAmARMukopsB
+              type: function
+        created: 1771828660
+        id: chatcmpl_6HEgD7zMer6W3ob8
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion
+        usage:
+          completion_tokens: 24
+          prompt_tokens: 166
+          total_tokens: 190
+    ChatCompletionTool:
+      properties:
+        type:
+          type: string
+          const: function
+          title: Type
+        function:
+          $ref: '#/components/schemas/ChatCompletionToolFunction'
+      type: object
+      required:
+      - type
+      - function
+      title: ChatCompletionTool
+    ChatCompletionToolFunction:
+      properties:
+        name:
+          type: string
+          title: Name
+        description:
+          type: string
+          title: Description
+        parameters:
+          additionalProperties:
+            anyOf:
+            - type: integer
+            - type: string
+            - type: boolean
+            - items: {}
+              type: array
+            - additionalProperties: true
+              type: object
+            - type: 'null'
+          type: object
+          title: Parameters
+      type: object
+      required:
+      - name
+      - parameters
+      title: ChatCompletionToolFunction
+    ChatMessage:
+      properties:
+        role:
+          type: string
+          enum:
+          - assistant
+          - function
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+        reasoning_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reasoning Content
+        tool_calls:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ToolCall'
+            type: array
+          - type: 'null'
+          title: Tool Calls
+      type: object
+      required:
+      - role
+      title: ChatMessage
+    CompletionUsage:
+      properties:
+        prompt_tokens:
+          type: integer
+          title: Prompt Tokens
+        completion_tokens:
+          type: integer
+          title: Completion Tokens
+        total_tokens:
+          type: integer
+          title: Total Tokens
+      type: object
+      required:
+      - prompt_tokens
+      - completion_tokens
+      - total_tokens
+      title: CompletionUsage
+    EmbeddingData:
+      properties:
+        object:
+          type: string
+          const: embedding
+          title: Object
+          default: embedding
+        embedding:
+          items:
+            type: number
+          type: array
+          title: Embedding
+        index:
+          type: integer
+          title: Index
+      type: object
+      required:
+      - embedding
+      - index
+      title: EmbeddingData
+    EmbeddingRequest:
+      properties:
+        input:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+            maxItems: 2048
+          title: Input
+        model:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Model
+          description: Model identifier
+      type: object
+      required:
+      - input
+      title: EmbeddingRequest
+    EmbeddingResponse:
+      properties:
+        object:
+          type: string
+          const: list
+          title: Object
+          default: list
+        data:
+          items:
+            $ref: '#/components/schemas/EmbeddingData'
+          type: array
+          title: Data
+        model:
+          type: string
+          title: Model
+      type: object
+      required:
+      - data
+      - model
+      title: EmbeddingResponse
+      examples:
+      - data:
+        - embedding:
+          - -0.046052
+          - 0.028006
+          - 0.014284
+          - 0.025734
+          - -0.034211
+          index: 0
+          object: embedding
+        model: all-MiniLM-L6-v2
+        object: list
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ModelInfo:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Model identifier for use in API endpoints
+        object:
+          type: string
+          const: model
+          title: Object
+          default: model
+        created:
+          type: integer
+          title: Created
+          description: Unix timestamp when the model was created
+        owned_by:
+          type: string
+          title: Owned By
+          description: Organization that owns the model
+      type: object
+      required:
+      - id
+      - created
+      - owned_by
+      title: ModelInfo
+      description: Single model entry for GET /api/v1/models.
+    ModelListResponse:
+      properties:
+        object:
+          type: string
+          const: list
+          title: Object
+          default: list
+        data:
+          items:
+            $ref: '#/components/schemas/ModelInfo'
+          type: array
+          title: Data
+          description: List of available models
+      type: object
+      required:
+      - data
+      title: ModelListResponse
+      description: Response for GET /api/v1/models.
+      examples:
+      - data:
+        - created: 1771811606
+          id: Qwen3-0.6B-Q4_K_M
+          object: model
+          owned_by: second-state
+        - created: 1771811614
+          id: all-MiniLM-L6-v2
+          object: model
+          owned_by: sentence-transformers
+        object: list
+    ToolCall:
+      properties:
+        id:
+          type: string
+          title: Id
+        type:
+          type: string
+          const: function
+          title: Type
+          default: function
+        function:
+          $ref: '#/components/schemas/ToolCallFunction'
+      type: object
+      required:
+      - id
+      - function
+      title: ToolCall
+    ToolCallFunction:
+      properties:
+        name:
+          type: string
+          title: Name
+        arguments:
+          type: string
+          title: Arguments
+      type: object
+      required:
+      - name
+      - arguments
+      title: ToolCallFunction
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    ChatCompletionChunkResponse:
+      description: 'Schema for each SSE ``data:`` payload in a streaming chat completion.
+
+
+        Not used for runtime validation (chunks are pre-serialised dicts),
+
+        but exposed here so OpenAPI / Swagger documents the streaming format.'
+      examples:
+      - choices:
+        - delta:
+            role: assistant
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            reasoning_content: Let me think.
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            content: 2 + 2 equals **4**.
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            tool_calls:
+            - function:
+                arguments: '{"location": "San Francisco"}'
+                name: get_weather
+              id: call_1MSB4PoE3eerSEJu
+              index: 0
+              type: function
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828662
+        id: chatcmpl_uXmbuefsXElrLqSkb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta: {}
+          finish_reason: stop
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      properties:
+        id:
+          title: Id
+          type: string
+        object:
+          const: chat.completion.chunk
+          default: chat.completion.chunk
+          title: Object
+          type: string
+        created:
+          title: Created
+          type: integer
+        model:
+          title: Model
+          type: string
+        choices:
+          items:
+            $ref: '#/components/schemas/ChatCompletionChunkChoice'
+          title: Choices
+          type: array
+      required:
+      - id
+      - created
+      - model
+      - choices
+      title: ChatCompletionChunkResponse
+      type: object
+    ChatCompletionChunkChoice:
+      properties:
+        index:
+          title: Index
+          type: integer
+        delta:
+          $ref: '#/components/schemas/ChatDelta'
+        logprobs:
+          anyOf:
+          - {}
+          - type: 'null'
+          default: null
+          title: Logprobs
+        finish_reason:
+          anyOf:
+          - enum:
+            - stop
+            - length
+            - tool_calls
+            - function_call
+            type: string
+          - type: 'null'
+          default: null
+          title: Finish Reason
+      required:
+      - index
+      - delta
+      title: ChatCompletionChunkChoice
+      type: object
+    ChatDelta:
+      properties:
+        role:
+          anyOf:
+          - enum:
+            - system
+            - user
+            - assistant
+            - tool
+            type: string
+          - type: 'null'
+          default: null
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Content
+        reasoning_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reasoning Content
+        tool_calls:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/DeltaToolCall'
+            type: array
+          - type: 'null'
+          default: null
+          title: Tool Calls
+      title: ChatDelta
+      type: object
+    DeltaToolCall:
+      description: 'Streaming tool call emitted by ``StreamPostProcessor``.
+
+
+        Our postprocessor accumulates the full ``<tool_call>`` block before
+
+        emitting, so every field is always present (never partial/incremental).
+
+        ``index`` is the ordinal position of this tool call in the response.'
+      properties:
+        index:
+          title: Index
+          type: integer
+        id:
+          title: Id
+          type: string
+        type:
+          const: function
+          default: function
+          title: Type
+          type: string
+        function:
+          $ref: '#/components/schemas/ToolCallFunction'
+      required:
+      - index
+      - id
+      - function
+      title: DeltaToolCall
+      type: object

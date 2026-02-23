@@ -20,6 +20,7 @@ from slm_server.model import (
 from .constants import (
     ATTR_CHUNK_COUNT,
     ATTR_COMPLETION_TOKENS,
+    ATTR_FINISH_REASON,
     ATTR_FORCE_SAMPLE,
     ATTR_INPUT_CONTENT_LENGTH,
     ATTR_INPUT_COUNT,
@@ -35,6 +36,7 @@ from .constants import (
     EMBEDDING_MODEL_NAME,
     EVENT_ATTR_CHUNK_CONTENT_SIZE,
     EVENT_ATTR_CHUNK_SIZE,
+    EVENT_ATTR_FINISH_REASON,
     EVENT_CHUNK_GENERATED,
     MODEL_NAME,
     SPAN_CHAT_COMPLETION,
@@ -48,9 +50,7 @@ logger = logging.getLogger(__name__)
 
 def set_atrribute_response(span: Span, response: ChatCompletionResponse | dict):
     """Set response attributes automatically."""
-    # Non-streaming response - handle both dict and object responses
     if isinstance(response, dict):
-        # Handle dict response
         usage = response.get("usage")
         if usage:
             span.set_attribute(ATTR_PROMPT_TOKENS, usage.get("prompt_tokens", 0))
@@ -60,19 +60,26 @@ def set_atrribute_response(span: Span, response: ChatCompletionResponse | dict):
             span.set_attribute(ATTR_TOTAL_TOKENS, usage.get("total_tokens", 0))
 
         choices = response.get("choices", [])
-        if choices and choices[0].get("message"):
-            content = choices[0]["message"].get("content") or ""
-            span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+        if choices:
+            if choices[0].get("message"):
+                content = choices[0]["message"].get("content") or ""
+                span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+            finish = choices[0].get("finish_reason")
+            if finish:
+                span.set_attribute(ATTR_FINISH_REASON, finish)
     else:
-        # Handle object response (original code)
         if response.usage:
             span.set_attribute(ATTR_PROMPT_TOKENS, response.usage.prompt_tokens)
             span.set_attribute(ATTR_COMPLETION_TOKENS, response.usage.completion_tokens)
             span.set_attribute(ATTR_TOTAL_TOKENS, response.usage.total_tokens)
 
-        if response.choices and response.choices[0].message:
-            content = response.choices[0].message.content or ""
-            span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+        if response.choices:
+            if response.choices[0].message:
+                content = response.choices[0].message.content or ""
+                span.set_attribute(ATTR_OUTPUT_CONTENT_LENGTH, len(content))
+            if response.choices[0].finish_reason:
+                reason = response.choices[0].finish_reason
+                span.set_attribute(ATTR_FINISH_REASON, reason)
 
 
 def set_atrribute_response_stream(
@@ -80,31 +87,31 @@ def set_atrribute_response_stream(
 ):
     """Record streaming chunk as an event and accumulate tokens."""
     chunk_content = ""
+    finish_reason = ""
     if isinstance(response, dict):
-        # Handle dict response
         choices = response.get("choices", [])
         if choices and choices[0].get("delta") and choices[0]["delta"].get("content"):
             chunk_content = choices[0]["delta"]["content"]
-        chunk_json = str(response)  # Simple string representation for dict
+        if choices:
+            finish_reason = choices[0].get("finish_reason") or ""
+        chunk_json = str(response)
     else:
-        # Handle object response (original code)
         if (
             response.choices
             and response.choices[0].delta
             and response.choices[0].delta.content
         ):
             chunk_content = response.choices[0].delta.content
+        if response.choices:
+            finish_reason = response.choices[0].finish_reason or ""
         chunk_json = response.model_dump_json()
 
-    # Record chunk as an event
     chunk_event = {
         EVENT_ATTR_CHUNK_SIZE: len(chunk_json),
         EVENT_ATTR_CHUNK_CONTENT_SIZE: len(chunk_content),
-        # EVENT_ATTR_CHUNK_CONTENT: chunk_content,
-        # EVENT_ATTR_FINISH_REASON: response.choices[0].finish_reason or 0
-        # if response.choices
-        # else None,
     }
+    if finish_reason:
+        chunk_event[EVENT_ATTR_FINISH_REASON] = finish_reason
     span.add_event(EVENT_CHUNK_GENERATED, chunk_event)
 
     # Only count chunks with actual content

@@ -214,3 +214,6 @@ models/*
 
 # IDE related
 .vscode
+
+# Custom logs
+logs/

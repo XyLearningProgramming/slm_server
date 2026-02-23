@@ -13,6 +13,7 @@ EVENT_CHUNK_GENERATED = f"{SPAN_PREFIX}.chunk_generated"
 # Event attribute names
 EVENT_ATTR_CHUNK_SIZE = f"{SPAN_PREFIX}.chunk_size"
 EVENT_ATTR_CHUNK_CONTENT_SIZE = f"{SPAN_PREFIX}.chunk_content_size"
+EVENT_ATTR_FINISH_REASON = f"{SPAN_PREFIX}.finish_reason"
 
 # Attribute names
 ATTR_MODEL = f"{SPAN_PREFIX}.model"
@@ -27,6 +28,7 @@ ATTR_CHUNK_SIZE = f"{SPAN_PREFIX}.chunk.size"
 ATTR_PROMPT_TOKENS = f"{SPAN_PREFIX}.usage.prompt_tokens"
 ATTR_COMPLETION_TOKENS = f"{SPAN_PREFIX}.usage.completion_tokens"
 ATTR_TOTAL_TOKENS = f"{SPAN_PREFIX}.usage.total_tokens"
+ATTR_FINISH_REASON = f"{SPAN_PREFIX}.finish_reason"
 ATTR_FORCE_SAMPLE = f"{SPAN_PREFIX}.force_sample"
 
 # Embedding attributes
