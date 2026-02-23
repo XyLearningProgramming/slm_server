@@ -128,5 +128,35 @@ probes:
     successThreshold: 1
     failureThreshold: 5
 
+# Content is injected at deploy time via: --set-file configMapData.download=scripts/download.sh
+configMapData: {}
+
+# Volumes and volumeMounts rendered via tpl so template expressions work.
+volumes:
+  - name: models-storage
+    persistentVolumeClaim:
+      claimName: '{{ include "slm-server.fullname" . }}'
+  - name: scripts
+    configMap:
+      name: '{{ include "slm-server.fullname" . }}-scripts'
+      defaultMode: 0755
+      items:
+        - key: download
+          path: download.sh
+
+volumeMounts:
+  - name: models-storage
+    mountPath: /app/models
+
+initContainers:
+  - name: download-model
+    image: curlimages/curl:latest
+    command: ["sh", "-c", "MODEL_DIR=/app/models sh /scripts/download.sh"]
+    volumeMounts:
+      - name: models-storage
+        mountPath: /app/models
+      - name: scripts
+        mountPath: /scripts
+
 strategy:
   type: Recreate
