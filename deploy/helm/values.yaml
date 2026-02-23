@@ -80,7 +80,7 @@ env: {}
 # Resource requests and limits for the container.
 # See https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 #
-# Memory budget breakdown (target node: 1-CPU / 2 GB VPS):
+# Memory budget breakdown (target node: active-nerd-2, 3 CPU / 2 GiB RAM):
 #   Chat LLM  – Qwen3-0.6B-Q4_K_M.gguf       ~484 MB (4-bit quantised)
 #   Embedding – all-MiniLM-L6-v2 quint8 ONNX   ~23 MB (uint8 AVX2 quantised)
 #   KV cache  – n_ctx=2048                     ~50-80 MB
@@ -95,15 +95,16 @@ env: {}
 #     embeddings via mean pooling, ranking well on STS benchmarks for its
 #     size. The quint8 AVX2 variant keeps the file at 23 MB vs 90 MB fp32.
 #
-# Why the limit is reasonable:
-#   - The worker node (active-nerd-2) has 2 GiB total RAM shared with the
-#     OS and other pods. 550 Mi request leaves headroom; the 1 Gi hard
-#     limit prevents OOM-kill from bursty KV-cache growth.
-#   - MAX_CONCURRENCY=1 ensures only one inference runs at a time, so peak
-#     memory is predictable (no concurrent KV-cache allocations).
+# CPU: llama.cpp token generation is CPU-bound and scales with cores.
+#   With 3 cores on the node and MAX_CONCURRENCY=1, allowing up to 2
+#   cores lets inference saturate available parallelism while leaving
+#   headroom for the OS and sidecar workloads.
+# Memory: 550 Mi request leaves headroom; the 1 Gi hard limit prevents
+#   OOM-kill from bursty KV-cache growth. MAX_CONCURRENCY=1 keeps peak
+#   memory predictable (no concurrent KV-cache allocations).
 resources:
   limits:
-    cpu: 900m
+    cpu: "2"
     memory: 1Gi
   requests:
     cpu: 50m
