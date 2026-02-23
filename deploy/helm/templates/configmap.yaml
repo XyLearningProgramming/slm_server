@@ -1,3 +1,4 @@
+{{- if .Values.configMapData }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5,5 +6,8 @@ metadata:
   labels:
     {{- include "slm-server.labels" . | nindent 4 }}
 data:
-  download.sh: |-
-    {{- .Files.Get "scripts/download.sh" | nindent 4 }}
+  {{- range $key, $val := .Values.configMapData }}
+  {{ $key }}: |
+    {{- $val | nindent 4 }}
+  {{- end }}
+{{- end }}

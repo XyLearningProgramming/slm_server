@@ -24,6 +24,10 @@ inputs:
     description: 'Kubernetes namespace'
     required: true
     default: 'backend'
+  helm_set_files:
+    description: 'Comma-separated --set-file args, e.g. "configMapData.download\.sh=scripts/download.sh"'
+    required: false
+    default: ''
   github_token:
     description: 'GitHub token for Helm installation'
     required: true
@@ -92,11 +96,22 @@ runs:
         ${{ steps.parse_env.outputs.helm_env_values }}
         EOF
         
+        # Build --set-file flags from comma-separated input
+        SET_FILE_FLAGS=""
+        if [ -n "${{ inputs.helm_set_files }}" ]; then
+          IFS=',' read -ra PAIRS <<< "${{ inputs.helm_set_files }}"
+          for pair in "${PAIRS[@]}"; do
+            pair=$(echo "$pair" | xargs)
+            [ -n "$pair" ] && SET_FILE_FLAGS="$SET_FILE_FLAGS --set-file $pair"
+          done
+        fi
+
         # Deploy using Helm (values file won't be logged due to file redirection)
         helm upgrade --install slm-server ./deploy/helm \
           --namespace ${{ inputs.namespace }} \
           --create-namespace \
           --values "$temp_values" \
+          $SET_FILE_FLAGS \
           --wait \
           --timeout 10m
         

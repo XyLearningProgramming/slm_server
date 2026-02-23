@@ -19,15 +19,10 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.initContainers }}
       initContainers:
-        - name: download-model
-          image: busybox:1.28
-          command: ["sh", "-c", "/scripts/download.sh"]
-          volumeMounts:
-            - name: models-storage
-              mountPath: {{ .Values.persistence.mountPath }}
-            - name: scripts
-              mountPath: /scripts
+        {{- tpl (toYaml .Values.initContainers) . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -67,20 +62,13 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.volumeMounts }}
           volumeMounts:
-            - name: models-storage
-              mountPath: {{ .Values.persistence.mountPath }}
-      volumes:
-        - name: models-storage
-          {{- if .Values.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "slm-server.fullname" . }}
-          {{- else }}
-          emptyDir: {}
+            {{- tpl (toYaml .Values.volumeMounts) . | nindent 12 }}
           {{- end }}
-        - name: scripts
-          configMap:
-            name: {{ include "slm-server.fullname" . }}-scripts
-            defaultMode: 0755
+      {{- if .Values.volumes }}
+      volumes:
+        {{- tpl (toYaml .Values.volumes) . | nindent 8 }}
+      {{- end }}
   strategy:
     {{- toYaml .Values.strategy | nindent 4 }}
