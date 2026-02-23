@@ -13,7 +13,7 @@ from llama_cpp.llama_types import (
     ChatCompletionTool,
     ChatCompletionToolChoiceOption,
 )
-from pydantic import BaseModel, ConfigDict, Field, conlist, model_validator
+from pydantic import BaseModel, ConfigDict, Field, conlist, field_validator, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +92,27 @@ class ChatCompletionRequest(BaseModel):
     top_logprobs: int | None = Field(
         default=None, description="Number of top log probabilities to return"
     )
+
+    @field_validator("messages", mode="before")
+    @classmethod
+    def _normalize_assistant_content(cls, v: Any) -> Any:
+        """Allow ``content: null`` on assistant messages (OpenAI spec compat).
+
+        llama-cpp's TypedDict defines ``content: NotRequired[str]`` which
+        rejects ``None`` when the key is present.  The OpenAI spec allows
+        ``null`` on assistant messages that carry ``tool_calls``, and
+        langchain-openai sends it that way, so we normalise here.
+        """
+        if isinstance(v, list):
+            for msg in v:
+                if (
+                    isinstance(msg, dict)
+                    and msg.get("role") == "assistant"
+                    and "content" in msg
+                    and msg["content"] is None
+                ):
+                    msg["content"] = ""
+        return v
 
     @model_validator(mode="after")
     def _default_tool_choice_auto(self) -> Self:
