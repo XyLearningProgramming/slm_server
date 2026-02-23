@@ -14,7 +14,6 @@ from slm_server.embedding import OnnxEmbeddingModel
 from slm_server.logging import setup_logging
 from slm_server.metrics import setup_metrics
 from slm_server.model import (
-    ChatCompletionChunkResponse,
     ChatCompletionRequest,
     ChatCompletionResponse,
     EmbeddingData,
@@ -22,6 +21,7 @@ from slm_server.model import (
     EmbeddingResponse,
     ModelInfo,
     ModelListResponse,
+    register_streaming_schema,
 )
 from slm_server.trace import setup_tracing
 from slm_server.utils import (
@@ -50,6 +50,12 @@ STATUS_CODE_SEM_TIMEOUT = HTTPStatus.REQUEST_TIMEOUT
 STATUS_CODE_EXCEPTION = HTTPStatus.INTERNAL_SERVER_ERROR
 # Media type for streaming responses.
 STREAM_RESPONSE_MEDIA_TYPE = "text/event-stream"
+# Schema for streaming responses.
+STREAM_RESPONSE_SCHEMA = {
+    "schema": {
+        "$ref": "#/components/schemas/ChatCompletionChunkResponse"
+    }
+}
 
 
 def get_llm_semaphor() -> asyncio.Semaphore:
@@ -99,6 +105,8 @@ def get_app() -> FastAPI:
 
     # Setup trace and OTel metrics (this will also instrument FastAPI)
     setup_tracing(app, settings.tracing)
+
+    register_streaming_schema(app)
 
     return app
 
@@ -182,9 +190,7 @@ async def run_llm_non_streaming(
     responses={
         200: {
             "content": {
-                STREAM_RESPONSE_MEDIA_TYPE: {
-                    "schema": ChatCompletionChunkResponse.model_json_schema(),
-                }
+                STREAM_RESPONSE_MEDIA_TYPE: STREAM_RESPONSE_SCHEMA,
             },
         },
     },

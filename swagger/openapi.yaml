@@ -39,189 +39,7 @@ paths:
                 $ref: '#/components/schemas/ChatCompletionResponse'
             text/event-stream:
               schema:
-                $defs:
-                  ChatCompletionChunkChoice:
-                    properties:
-                      index:
-                        type: integer
-                        title: Index
-                      delta:
-                        $ref: '#/$defs/ChatDelta'
-                      logprobs:
-                        anyOf:
-                        - {}
-                        - type: 'null'
-                        title: Logprobs
-                      finish_reason:
-                        anyOf:
-                        - type: string
-                          enum:
-                          - stop
-                          - length
-                          - tool_calls
-                          - function_call
-                        - type: 'null'
-                        title: Finish Reason
-                    type: object
-                    required:
-                    - index
-                    - delta
-                    title: ChatCompletionChunkChoice
-                  ChatDelta:
-                    properties:
-                      role:
-                        anyOf:
-                        - type: string
-                          enum:
-                          - system
-                          - user
-                          - assistant
-                          - tool
-                        - type: 'null'
-                        title: Role
-                      content:
-                        anyOf:
-                        - type: string
-                        - type: 'null'
-                        title: Content
-                      reasoning_content:
-                        anyOf:
-                        - type: string
-                        - type: 'null'
-                        title: Reasoning Content
-                      tool_calls:
-                        anyOf:
-                        - items:
-                            $ref: '#/$defs/DeltaToolCall'
-                          type: array
-                        - type: 'null'
-                        title: Tool Calls
-                    type: object
-                    title: ChatDelta
-                  DeltaToolCall:
-                    properties:
-                      index:
-                        type: integer
-                        title: Index
-                      id:
-                        type: string
-                        title: Id
-                      type:
-                        type: string
-                        const: function
-                        title: Type
-                        default: function
-                      function:
-                        $ref: '#/$defs/ToolCallFunction'
-                    type: object
-                    required:
-                    - index
-                    - id
-                    - function
-                    title: DeltaToolCall
-                    description: 'Streaming tool call emitted by ``StreamPostProcessor``.
-
-
-                      Our postprocessor accumulates the full ``<tool_call>`` block
-                      before
-
-                      emitting, so every field is always present (never partial/incremental).
-
-                      ``index`` is the ordinal position of this tool call in the response.'
-                  ToolCallFunction:
-                    properties:
-                      name:
-                        type: string
-                        title: Name
-                      arguments:
-                        type: string
-                        title: Arguments
-                    type: object
-                    required:
-                    - name
-                    - arguments
-                    title: ToolCallFunction
-                properties:
-                  id:
-                    type: string
-                    title: Id
-                  object:
-                    type: string
-                    const: chat.completion.chunk
-                    title: Object
-                    default: chat.completion.chunk
-                  created:
-                    type: integer
-                    title: Created
-                  model:
-                    type: string
-                    title: Model
-                  choices:
-                    items:
-                      $ref: '#/$defs/ChatCompletionChunkChoice'
-                    type: array
-                    title: Choices
-                type: object
-                required:
-                - id
-                - created
-                - model
-                - choices
-                title: ChatCompletionChunkResponse
-                description: 'Schema for each SSE ``data:`` payload in a streaming
-                  chat completion.
-
-
-                  Not used for runtime validation (chunks are pre-serialised dicts),
-
-                  but exposed here so OpenAPI / Swagger documents the streaming format.'
-                examples:
-                - choices:
-                  - delta:
-                      role: assistant
-                    index: 0
-                  created: 1771828652
-                  id: chatcmpl_vGxUUAi7KYLIEaNGb
-                  model: Qwen3-0.6B-Q4_K_M
-                  object: chat.completion.chunk
-                - choices:
-                  - delta:
-                      reasoning_content: Let me think.
-                    index: 0
-                  created: 1771828652
-                  id: chatcmpl_vGxUUAi7KYLIEaNGb
-                  model: Qwen3-0.6B-Q4_K_M
-                  object: chat.completion.chunk
-                - choices:
-                  - delta:
-                      content: 2 + 2 equals **4**.
-                    index: 0
-                  created: 1771828652
-                  id: chatcmpl_vGxUUAi7KYLIEaNGb
-                  model: Qwen3-0.6B-Q4_K_M
-                  object: chat.completion.chunk
-                - choices:
-                  - delta:
-                      tool_calls:
-                      - function:
-                          arguments: '{"location": "San Francisco"}'
-                          name: get_weather
-                        id: call_1MSB4PoE3eerSEJu
-                        index: 0
-                        type: function
-                    index: 0
-                  created: 1771828662
-                  id: chatcmpl_uXmbuefsXElrLqSkb
-                  model: Qwen3-0.6B-Q4_K_M
-                  object: chat.completion.chunk
-                - choices:
-                  - delta: {}
-                    finish_reason: stop
-                    index: 0
-                  created: 1771828652
-                  id: chatcmpl_vGxUUAi7KYLIEaNGb
-                  model: Qwen3-0.6B-Q4_K_M
-                  object: chat.completion.chunk
+                $ref: '#/components/schemas/ChatCompletionChunkResponse'
         '422':
           description: Validation Error
           content:
@@ -1078,3 +896,186 @@ components:
       - msg
       - type
       title: ValidationError
+    ChatCompletionChunkResponse:
+      description: 'Schema for each SSE ``data:`` payload in a streaming chat completion.
+
+
+        Not used for runtime validation (chunks are pre-serialised dicts),
+
+        but exposed here so OpenAPI / Swagger documents the streaming format.'
+      examples:
+      - choices:
+        - delta:
+            role: assistant
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            reasoning_content: Let me think.
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            content: 2 + 2 equals **4**.
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta:
+            tool_calls:
+            - function:
+                arguments: '{"location": "San Francisco"}'
+                name: get_weather
+              id: call_1MSB4PoE3eerSEJu
+              index: 0
+              type: function
+          finish_reason: null
+          index: 0
+          logprobs: null
+        created: 1771828662
+        id: chatcmpl_uXmbuefsXElrLqSkb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      - choices:
+        - delta: {}
+          finish_reason: stop
+          index: 0
+          logprobs: null
+        created: 1771828652
+        id: chatcmpl_vGxUUAi7KYLIEaNGb
+        model: Qwen3-0.6B-Q4_K_M
+        object: chat.completion.chunk
+      properties:
+        id:
+          title: Id
+          type: string
+        object:
+          const: chat.completion.chunk
+          default: chat.completion.chunk
+          title: Object
+          type: string
+        created:
+          title: Created
+          type: integer
+        model:
+          title: Model
+          type: string
+        choices:
+          items:
+            $ref: '#/components/schemas/ChatCompletionChunkChoice'
+          title: Choices
+          type: array
+      required:
+      - id
+      - created
+      - model
+      - choices
+      title: ChatCompletionChunkResponse
+      type: object
+    ChatCompletionChunkChoice:
+      properties:
+        index:
+          title: Index
+          type: integer
+        delta:
+          $ref: '#/components/schemas/ChatDelta'
+        logprobs:
+          anyOf:
+          - {}
+          - type: 'null'
+          default: null
+          title: Logprobs
+        finish_reason:
+          anyOf:
+          - enum:
+            - stop
+            - length
+            - tool_calls
+            - function_call
+            type: string
+          - type: 'null'
+          default: null
+          title: Finish Reason
+      required:
+      - index
+      - delta
+      title: ChatCompletionChunkChoice
+      type: object
+    ChatDelta:
+      properties:
+        role:
+          anyOf:
+          - enum:
+            - system
+            - user
+            - assistant
+            - tool
+            type: string
+          - type: 'null'
+          default: null
+          title: Role
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Content
+        reasoning_content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Reasoning Content
+        tool_calls:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/DeltaToolCall'
+            type: array
+          - type: 'null'
+          default: null
+          title: Tool Calls
+      title: ChatDelta
+      type: object
+    DeltaToolCall:
+      description: 'Streaming tool call emitted by ``StreamPostProcessor``.
+
+
+        Our postprocessor accumulates the full ``<tool_call>`` block before
+
+        emitting, so every field is always present (never partial/incremental).
+
+        ``index`` is the ordinal position of this tool call in the response.'
+      properties:
+        index:
+          title: Index
+          type: integer
+        id:
+          title: Id
+          type: string
+        type:
+          const: function
+          default: function
+          title: Type
+          type: string
+        function:
+          $ref: '#/components/schemas/ToolCallFunction'
+      required:
+      - index
+      - id
+      - function
+      title: DeltaToolCall
+      type: object

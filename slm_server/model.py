@@ -1,4 +1,9 @@
-from typing import Any, Literal, Self
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Literal, Self
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from llama_cpp.llama_types import (
     ChatCompletionFunction,
@@ -443,3 +448,38 @@ class ModelListResponse(BaseModel):
 
     object: Literal["list"] = "list"
     data: list[ModelInfo] = Field(description="List of available models")
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI helpers
+# ---------------------------------------------------------------------------
+
+
+def register_streaming_schema(app: FastAPI) -> None:
+    """Register ``ChatCompletionChunkResponse`` in OpenAPI ``components.schemas``.
+
+    Pydantic's ``model_json_schema()`` puts nested models under a local
+    ``$defs`` key, but Swagger UI resolves ``$ref`` from the document root.
+    This patches ``app.openapi`` to hoist the chunk schema and its
+    dependencies into ``components.schemas`` with correct ``$ref`` paths.
+    """
+    _original = app.openapi
+
+    def patched_openapi():  # type: ignore[no-untyped-def]
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = _original()
+        chunk_schema = ChatCompletionChunkResponse.model_json_schema(
+            ref_template="#/components/schemas/{model}",
+        )
+        defs = chunk_schema.pop("$defs", {})
+        schemas = schema.setdefault("components", {}).setdefault("schemas", {})
+        schemas["ChatCompletionChunkResponse"] = chunk_schema
+        for name, defn in defs.items():
+            schemas.setdefault(name, defn)
+
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = patched_openapi  # type: ignore[method-assign]
