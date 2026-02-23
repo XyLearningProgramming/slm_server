@@ -19,7 +19,7 @@ from pydantic import (
     Field,
     conlist,
     field_validator,
-    model_validator
+    model_validator,
 )
 
 
